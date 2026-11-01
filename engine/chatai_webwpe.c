@@ -1667,6 +1667,54 @@ static gboolean on_ctl_readable(GIOChannel *ch, GIOCondition cond, gpointer data
 }
 
 /* ------------------------------------------------------------------------ */
+/* GPU policy                                                               */
+
+/* Render node of the GPU that drives the display (boot_vga=1), so an
+ * opted-in GPU mode never wakes a discrete card on hybrid laptops. */
+static char *boot_vga_render_node(void) {
+  GDir *dir = g_dir_open("/sys/class/drm", 0, NULL);
+  if (!dir)
+    return NULL;
+  char *found = NULL;
+  const char *name;
+  while (!found && (name = g_dir_read_name(dir))) {
+    if (!g_str_has_prefix(name, "renderD"))
+      continue;
+    char *path = g_strdup_printf("/sys/class/drm/%s/device/boot_vga", name);
+    char *val = NULL;
+    if (g_file_get_contents(path, &val, NULL, NULL) && val[0] == '1')
+      found = g_strdup_printf("/dev/dri/%s", name);
+    g_free(val);
+    g_free(path);
+  }
+  g_dir_close(dir);
+  return found;
+}
+
+/* WebKit's web process always creates an EGL context for compositing. By
+ * default it gets Mesa's software rasterizer: no GPU driver is loaded at all,
+ * so driver bugs (e.g. nouveau crashing on hybrid laptops) can't take the
+ * page down and a sleeping discrete GPU stays asleep. The environment is
+ * inherited by the WebKit child processes. */
+static void configure_gpu(int use_gpu) {
+  g_setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", FALSE);
+  g_unsetenv("DRI_PRIME");
+  if (g_file_test("/usr/share/glvnd/egl_vendor.d/50_mesa.json", G_FILE_TEST_EXISTS))
+    g_setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", TRUE);
+  if (!use_gpu) {
+    g_setenv("LIBGL_ALWAYS_SOFTWARE", "1", TRUE);
+    g_setenv("GALLIUM_DRIVER", "llvmpipe", TRUE);
+    g_setenv("LP_NUM_THREADS", "0", FALSE); /* rasterize inline: fewer threads, less RAM */
+    return;
+  }
+  char *node = boot_vga_render_node();
+  if (node) {
+    g_setenv("WEBKIT_WEB_RENDER_DEVICE_FILE", node, TRUE);
+    g_free(node);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
 /* main                                                                     */
 
 static const char *arg_value(int argc, char **argv, const char *name) {
@@ -1721,9 +1769,7 @@ int main(int argc, char **argv) {
   g_shm = map;
   g_shm_pixels = (uint8_t *)map + sizeof(zurf_shm_header);
 
-  /* CPU rendering only: no GPU context in the web process either. */
-  g_setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", FALSE);
-  g_setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", FALSE);
+  configure_gpu(arg_flag(argc, argv, "--gpu") || truthy(g_getenv("CHATAI_WEB_GPU")));
 
   g_loop = g_main_loop_new(NULL, FALSE);
   g_downloads = g_ptr_array_new_with_free_func(dl_free);
