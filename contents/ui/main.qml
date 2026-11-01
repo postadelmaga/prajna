@@ -341,11 +341,11 @@ PlasmoidItem {
                     if (!headerRoot.isInteracting)
                         hideTimer.restart();
                 }
-                onPressed: {
+                onPressed: mouse => {
                     headerRoot.isInteracting = true;
                     mouse.accepted = false;
                 }
-                onReleased: {
+                onReleased: mouse => {
                     headerRoot.isInteracting = false;
                     if (!containsMouse)
                         hideTimer.restart();
@@ -387,12 +387,12 @@ PlasmoidItem {
                     hideTimer.restart();
             }
             // Pass mouse events to child components
-            onClicked: mouse.accepted = false
-            onPressed: mouse.accepted = false
-            onReleased: mouse.accepted = false
-            onDoubleClicked: mouse.accepted = false
-            onPositionChanged: mouse.accepted = false
-            onPressAndHold: mouse.accepted = false
+            onClicked: mouse => mouse.accepted = false
+            onPressed: mouse => mouse.accepted = false
+            onReleased: mouse => mouse.accepted = false
+            onDoubleClicked: mouse => mouse.accepted = false
+            onPositionChanged: mouse => mouse.accepted = false
+            onPressAndHold: mouse => mouse.accepted = false
 
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop
@@ -418,12 +418,38 @@ PlasmoidItem {
             }
         }
 
+        // While the popup is closed the page is throttled (hidden), and after
+        // `unloadAfterMinutes` the engine process is shut down entirely; the
+        // session (cookies, storage) lives on disk and the last URL reloads.
+        Binding {
+            target: webviewLoader.item ? webviewLoader.item.webview : null
+            property: "suspended"
+            value: !root.expanded
+            restoreMode: Binding.RestoreNone
+        }
+
+        Timer {
+            id: idleUnloadTimer
+
+            interval: Math.max(1, plasmoid.configuration.unloadAfterMinutes) * 60000
+            running: !root.expanded && webviewLoader.item !== null && plasmoid.configuration.unloadAfterMinutes > 0 && !plasmoid.configuration.loadOnStartup
+            onTriggered: {
+                if (webviewLoader.item)
+                    webviewLoader.item.webview.active = false;
+            }
+        }
+
         // Monitor plasmoid expansion state
         Connections {
             // Activate WebView when plasmoid is expanded
             function onExpandedChanged() {
-                if (root.expanded)
-                    webviewLoader.active = true;
+                if (!root.expanded)
+                    return;
+                webviewLoader.active = true;
+                if (webviewLoader.item) {
+                    webviewLoader.item.webview.active = true;
+                    webviewLoader.item.webview.forceActiveFocus();
+                }
             }
 
             target: root

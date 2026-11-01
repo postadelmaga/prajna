@@ -229,8 +229,20 @@
       <label>Clear cache when closing</label>
       <default>false</default>
     </entry>
+    <entry name="unloadAfterMinutes" type="Int">
+      <label>Stop the web engine after the popup has been closed for this many minutes (0 = never)</label>
+      <default>15</default>
+    </entry>
+    <entry name="memoryLimitMb" type="Int">
+      <label>Memory limit for the web engine in MB (0 = no limit)</label>
+      <default>0</default>
+    </entry>
+    <entry name="userAgent" type="String">
+      <label>Custom user agent (empty = default)</label>
+      <default></default>
+    </entry>
     <entry name="webEngineProfileName" type="String">
-      <label>Storage name used for Qt WebEngine profile</label>
+      <label>Profile name (cookies, logins and cache live in ~/.local/share/chatai-plasmoid/NAME)</label>
       <default>chat-ai</default>
     </entry>
   </group>

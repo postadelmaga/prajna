@@ -306,7 +306,7 @@ RowLayout {
     Binding {
         target: root
         property: "hideOnWindowDeactivate"
-        value: !plasmoid.configuration.pin
+        value: !plasmoid.configuration.pin && !(parent && parent.webviewRoot && parent.webviewRoot.dialogOpen)
         restoreMode: Binding.RestoreBinding
     }
 

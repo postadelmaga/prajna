@@ -1,6 +1,7 @@
 /*
  *  SPDX-FileCopyrightText: 2024 Denys Madureira <denysmb@zoho.com>
  *  SPDX-FileCopyrightText: 2025 Bruno Gonçalves <bigbruno@gmail.com>
+ *  SPDX-FileCopyrightText: 2026 Francesco Magazzu
  *
  *  SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
  */
@@ -10,7 +11,6 @@ import QtQuick.Layouts
 
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.kirigami as Kirigami
-import QtWebEngine
 
 Rectangle {
     id: findBar
@@ -18,6 +18,7 @@ Rectangle {
     property bool findBarVisible: false
     property var webviewItem
     property alias findText: findField.text
+    property int matches: -1
 
     signal closeRequested()
 
@@ -48,35 +49,30 @@ Rectangle {
             id: findField
 
             Layout.fillWidth: true
-
             placeholderText: i18n("Find in page...")
             onTextChanged: {
-                if (text && webviewItem) {
+                findBar.matches = -1;
+                if (!webviewItem)
+                    return;
+                if (text)
                     webviewItem.findText(text);
-                }
+                else
+                    webviewItem.stopFinding();
             }
-            onAccepted: {
-                if (webviewItem) {
-                    webviewItem.findText(text);
-                }
-            }
-            Keys.onEscapePressed: findBarVisible = false
+            onAccepted: if (webviewItem && text) webviewItem.findText(text)
+            Keys.onEscapePressed: findBar.closeRequested()
+        }
 
-            Component.onCompleted: {
-                if (findBarVisible) {
-                    forceActiveFocus();
-                }
-            }
+        PlasmaComponents3.Label {
+            visible: findField.text !== "" && findBar.matches >= 0
+            text: findBar.matches === 0 ? i18n("No matches") : i18np("%1 match", "%1 matches", findBar.matches)
+            opacity: 0.7
         }
 
         PlasmaComponents3.Button {
             icon.name: "go-up"
             display: PlasmaComponents3.AbstractButton.IconOnly
-            onClicked: {
-                if (webviewItem) {
-                    webviewItem.findText(findField.text, WebEngineView.FindBackward);
-                }
-            }
+            onClicked: if (webviewItem) webviewItem.findText(findField.text, true)
             PlasmaComponents3.ToolTip.text: i18n("Find previous")
             PlasmaComponents3.ToolTip.visible: hovered
             enabled: findField.text !== ""
@@ -85,11 +81,7 @@ Rectangle {
         PlasmaComponents3.Button {
             icon.name: "go-down"
             display: PlasmaComponents3.AbstractButton.IconOnly
-            onClicked: {
-                if (webviewItem) {
-                    webviewItem.findText(findField.text);
-                }
-            }
+            onClicked: if (webviewItem) webviewItem.findText(findField.text)
             PlasmaComponents3.ToolTip.text: i18n("Find next")
             PlasmaComponents3.ToolTip.visible: hovered
             enabled: findField.text !== ""
@@ -100,14 +92,7 @@ Rectangle {
             display: PlasmaComponents3.AbstractButton.IconOnly
             PlasmaComponents3.ToolTip.text: i18n("Close")
             PlasmaComponents3.ToolTip.visible: hovered
-            onClicked: closeRequested()
-        }
-    }
-
-    Behavior on height {
-        NumberAnimation {
-            duration: Kirigami.Units.shortDuration
-            easing.type: Easing.InOutQuad
+            onClicked: findBar.closeRequested()
         }
     }
 
@@ -118,8 +103,7 @@ Rectangle {
 
     function clearSearch() {
         findField.text = "";
-        if (webviewItem) {
-            webviewItem.findText("");
-        }
+        if (webviewItem)
+            webviewItem.stopFinding();
     }
 }

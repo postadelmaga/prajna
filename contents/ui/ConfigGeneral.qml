@@ -9,7 +9,6 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Dialogs
 import QtQuick.Layouts
-import QtWebEngine
 
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.kirigami 2.20 as Kirigami
@@ -21,6 +20,7 @@ import Qt.labs.platform 1.1
 KCM.SimpleKCM {
     id: configRoot
     readonly property string effectiveProfileName: plasmoid.configuration.webEngineProfileName && plasmoid.configuration.webEngineProfileName.length ? plasmoid.configuration.webEngineProfileName : "chat-ai"
+    readonly property string profilePath: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, '') + "/chatai-plasmoid/" + effectiveProfileName
 
     // Parse the comma-separated string and add valid entries to the model
     function loadSitesFromConfig() {
@@ -418,14 +418,6 @@ Action=Popup`
                 }
 
                 QQC2.CheckBox {
-                    id: javascriptCanPaste
-                    text: i18n("Allow JavaScript to paste from clipboard")
-                    checked: plasmoid.configuration.javascriptCanPaste
-                    onCheckedChanged: plasmoid.configuration.javascriptCanPaste = checked
-                    Layout.fillWidth: true
-                }
-
-                QQC2.CheckBox {
                     id: javascriptCanOpenWindows
                     text: i18n("Allow JavaScript to open new windows")
                     checked: plasmoid.configuration.javascriptCanOpenWindows
@@ -442,14 +434,6 @@ Action=Popup`
                 }
 
                 QQC2.CheckBox {
-                    id: allowUnknownUrlSchemes
-                    text: i18n("Allow unknown URL schemes")
-                    checked: plasmoid.configuration.allowUnknownUrlSchemes
-                    onCheckedChanged: plasmoid.configuration.allowUnknownUrlSchemes = checked
-                    Layout.fillWidth: true
-                }
-
-                QQC2.CheckBox {
                     id: playbackRequiresUserGesture
                     text: i18n("Require user gesture for media playback")
                     checked: plasmoid.configuration.playbackRequiresUserGesture
@@ -457,13 +441,6 @@ Action=Popup`
                     Layout.fillWidth: true
                 }
 
-                QQC2.CheckBox {
-                    id: focusOnNavigationEnabled
-                    text: i18n("Enable focus on navigation")
-                    checked: plasmoid.configuration.focusOnNavigationEnabled
-                    onCheckedChanged: plasmoid.configuration.focusOnNavigationEnabled = checked
-                    Layout.fillWidth: true
-                }
 
                 // Notifications Section
                 QQC2.Label {
@@ -518,60 +495,79 @@ Action=Popup`
                     Layout.fillWidth: true
                 }
 
-                // Cache Management Section
+                // Engine Section (WPE WebKit, out of process)
                 QQC2.Label {
-                    text: i18n("Cache Management")
+                    text: i18n("Web Engine")
                     font.bold: true
                     Layout.fillWidth: true
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.largeSpacing
-
-                    // Criar WebEngineProfile para gerenciar o cache
-                    WebEngineProfile {
-                        id: cacheProfile
-                        storageName: configRoot.effectiveProfileName
-                        offTheRecord: false
-                        httpCacheType: WebEngineProfile.DiskHttpCache
-                        persistentCookiesPolicy: WebEngineProfile.ForcePersistentCookies
-                    }
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.largeSpacing
-
-                            QQC2.Button {
-                                text: i18n("Open Cache Folder")
-                                icon.name: "folder"
-                                onClicked: {
-                                    let cachePath = Qt.resolvedUrl(cacheProfile.cachePath).toString().replace("file://", "");
-                                    Qt.openUrlExternally("file://" + cachePath);
-                                }
-                            }
-
-                            QQC2.Button {
-                                text: i18n("Open Profile Folder")
-                                icon.name: "folder"
-                                onClicked: {
-                                    let profilePath = StandardPaths.writableLocation(StandardPaths.HomeLocation) + "/.local/share/plasmashell/QtWebEngine/" + configRoot.effectiveProfileName;
-                                    Qt.openUrlExternally(profilePath);
-                                }
-                            }
-                        }
-                    }
                 }
 
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
                     type: Kirigami.MessageType.Information
-                    text: i18n("Cache location: %1\nProfile location: %2", Qt.resolvedUrl(cacheProfile.cachePath).toString().replace("file://", ""), StandardPaths.writableLocation(StandardPaths.HomeLocation) + "/.local/share/plasmashell/QtWebEngine/" + configRoot.effectiveProfileName)
+                    text: i18n("Pages are rendered by a separate lightweight WebKit process, never inside Plasma. While the popup is closed the page is paused; after the time below the process is stopped and its memory released (your login is kept).")
                     visible: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    QQC2.Label {
+                        text: i18n("Stop the engine after the popup is closed for:")
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                    }
+                    QQC2.SpinBox {
+                        from: 0
+                        to: 1440
+                        value: plasmoid.configuration.unloadAfterMinutes
+                        textFromValue: (v, locale) => v === 0 ? i18n("Never") : i18np("%1 minute", "%1 minutes", v)
+                        valueFromText: (t, locale) => parseInt(t) || 0
+                        onValueModified: plasmoid.configuration.unloadAfterMinutes = value
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    QQC2.Label {
+                        text: i18n("Memory limit for the web engine:")
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                    }
+                    QQC2.SpinBox {
+                        from: 0
+                        to: 16384
+                        stepSize: 128
+                        value: plasmoid.configuration.memoryLimitMb
+                        textFromValue: (v, locale) => v === 0 ? i18n("No limit") : i18n("%1 MB", v)
+                        valueFromText: (t, locale) => parseInt(t) || 0
+                        onValueModified: plasmoid.configuration.memoryLimitMb = value
+                    }
+                }
+
+                QQC2.Label {
+                    text: i18n("User agent (empty = default Safari-compatible):")
+                    Layout.fillWidth: true
+                }
+
+                QQC2.TextField {
+                    Layout.fillWidth: true
+                    text: plasmoid.configuration.userAgent
+                    placeholderText: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15"
+                    onEditingFinished: plasmoid.configuration.userAgent = text.trim()
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: i18n("Profile location: %1", configRoot.profilePath)
+                    }
+                    QQC2.Button {
+                        text: i18n("Open Profile Folder")
+                        icon.name: "folder"
+                        onClicked: Qt.openUrlExternally("file://" + configRoot.profilePath)
+                    }
                 }
 
                 Kirigami.Separator {
@@ -588,7 +584,7 @@ Action=Popup`
                 Kirigami.InlineMessage {
                     Layout.fillWidth: true
                     type: Kirigami.MessageType.Information
-                    text: i18n("Each widget instance stores cache and settings using the profile name. Use a unique name when you want this instance to keep its own session data.")
+                    text: i18n("Each widget instance stores cookies, logins and cache using the profile name. Use a unique name when you want this instance to keep its own session data.")
                     visible: true
                 }
 
