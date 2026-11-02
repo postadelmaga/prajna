@@ -526,6 +526,20 @@ Action=Popup`
                     }
                 }
 
+                QQC2.CheckBox {
+                    text: i18n("Use the integrated GPU for web pages")
+                    checked: plasmoid.configuration.gpuRendering
+                    onToggled: plasmoid.configuration.gpuRendering = checked
+                }
+
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                    text: i18n("Always the integrated GPU (e.g. Intel), never a discrete NVIDIA card, which stays asleep. Uses about half the memory of software drawing. Takes effect the next time the web engine starts.")
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
                     QQC2.Label {
@@ -545,7 +559,7 @@ Action=Popup`
                     Layout.fillWidth: true
                     type: Kirigami.MessageType.Information
                     visible: true
-                    text: i18n("Pages are drawn without the GPU. Animations (e.g. the \"thinking\" spinner) cost CPU for every frame: 30 fps uses about half the CPU of 60 fps.")
+                    text: i18n("Animations (e.g. the \"thinking\" spinner) cost CPU for every frame: 30 fps uses about half the CPU of 60 fps.")
                 }
 
                 RowLayout {

@@ -16,7 +16,7 @@ plasmashell ─ ChatAI QML ─ WebSurface (QQuickItem, ~1 MB plugin)
                                │  frames: BGRA slot in shared memory (seqlock)
                                │  control: socketpair (navigate, input, events)
                                ▼
-                         chatai-webwpe  ──  WPE WebKit (CPU rendering, no GPU)
+                         chatai-webwpe  ──  WPE WebKit (integrated GPU or CPU)
 ```
 
 - Nothing web-related is loaded into Plasma; if the engine crashes it is
@@ -24,7 +24,12 @@ plasmashell ─ ChatAI QML ─ WebSurface (QQuickItem, ~1 MB plugin)
 - While the popup is closed the page is paused, and after a configurable
   time (default 15 min) the engine is stopped and **all** its memory is released.
   Cookies and logins stay on disk (`~/.local/share/chatai-plasmoid/<profile>`).
-- WebKit runs as a single web process, without bfcache, WebGL or GPU contexts.
+- WebKit runs as a single web process, without bfcache or WebGL.
+- Rendering uses the **integrated** GPU (picked explicitly: the boot VGA /
+  Intel device, with `DRI_PRIME` pinned to it). A discrete NVIDIA card is
+  never used and stays asleep; nouveau is always skipped. Unchecking
+  "Use the integrated GPU" draws with Mesa's software rasterizer instead
+  (about twice the memory).
 - Supported: file uploads, downloads, notifications, microphone/camera
   permissions, clipboard both ways (including pasting images), find in page,
   context menu, login popups (OAuth), HiDPI, IME/dead keys.

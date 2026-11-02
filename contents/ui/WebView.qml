@@ -209,6 +209,7 @@ Item {
         profileDirectory: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, '') + "/chatai-plasmoid/" + webViewRoot.effectiveProfileName
         memoryLimitMb: plasmoid.configuration.memoryLimitMb
         maxFps: plasmoid.configuration.maxFps
+        gpuRendering: plasmoid.configuration.gpuRendering
         userAgent: plasmoid.configuration.userAgent || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15"
         downloadDirectory: webViewRoot.downloadDirectory
         darkMode: webViewRoot.isDarkTheme()

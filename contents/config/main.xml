@@ -233,6 +233,10 @@
       <label>Stop the web engine after the popup has been closed for this many minutes (0 = never)</label>
       <default>15</default>
     </entry>
+    <entry name="gpuRendering" type="Bool">
+      <label>Draw pages on the integrated GPU (Intel/AMD APU) instead of the CPU</label>
+      <default>true</default>
+    </entry>
     <entry name="maxFps" type="Int">
       <label>Maximum frame rate of the web page (lower = less CPU during animations)</label>
       <default>30</default>

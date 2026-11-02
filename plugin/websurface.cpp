@@ -267,6 +267,14 @@ void WebSurface::setMemoryLimitMb(int mb)
     Q_EMIT memoryLimitMbChanged();
 }
 
+void WebSurface::setGpuRendering(bool on)
+{
+    if (m_gpuRendering == on)
+        return;
+    m_gpuRendering = on;
+    Q_EMIT gpuRenderingChanged();
+}
+
 void WebSurface::setUrl(const QUrl &url)
 {
     if (!url.isValid() || m_url == url)
@@ -551,6 +559,8 @@ void WebSurface::startEngine()
         args << QStringLiteral("--zurf-url=%1").arg(QString::fromUtf8(m_url.toEncoded()));
     if (m_memoryLimitMb > 0)
         args << QStringLiteral("--memory-limit-mb=%1").arg(m_memoryLimitMb);
+    if (m_gpuRendering)
+        args << QStringLiteral("--gpu");
 
     m_process = new QProcess(this);
     m_process->setProgram(engine);

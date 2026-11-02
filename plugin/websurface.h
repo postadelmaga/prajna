@@ -42,6 +42,9 @@ class WebSurface : public QQuickItem
     Q_PROPERTY(QString enginePath READ enginePath WRITE setEnginePath NOTIFY enginePathChanged)
     Q_PROPERTY(QString profileDirectory READ profileDirectory WRITE setProfileDirectory NOTIFY profileDirectoryChanged)
     Q_PROPERTY(int memoryLimitMb READ memoryLimitMb WRITE setMemoryLimitMb NOTIFY memoryLimitMbChanged)
+    // Render on the integrated GPU (never a discrete/nouveau card) instead of
+    // the CPU. Applies on the next engine start.
+    Q_PROPERTY(bool gpuRendering READ gpuRendering WRITE setGpuRendering NOTIFY gpuRenderingChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
 
     // page state
@@ -115,6 +118,8 @@ public:
     void setProfileDirectory(const QString &dir);
     int memoryLimitMb() const { return m_memoryLimitMb; }
     void setMemoryLimitMb(int mb);
+    bool gpuRendering() const { return m_gpuRendering; }
+    void setGpuRendering(bool on);
     QString lastError() const { return m_lastError; }
 
     QUrl url() const { return m_url; }
@@ -172,6 +177,7 @@ Q_SIGNALS:
     void enginePathChanged();
     void profileDirectoryChanged();
     void memoryLimitMbChanged();
+    void gpuRenderingChanged();
     void lastErrorChanged();
     void urlChanged();
     void titleChanged();
@@ -265,6 +271,7 @@ private:
     QString m_enginePath;
     QString m_profileDir;
     int m_memoryLimitMb = 0;
+    bool m_gpuRendering = false;
     QString m_lastError;
 
     QUrl m_url;

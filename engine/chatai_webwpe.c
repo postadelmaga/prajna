@@ -1730,26 +1730,61 @@ static gboolean on_ctl_readable(GIOChannel *ch, GIOCondition cond, gpointer data
 /* ------------------------------------------------------------------------ */
 /* GPU policy                                                               */
 
-/* Render node of the GPU that drives the display (boot_vga=1), so an
- * opted-in GPU mode never wakes a discrete card on hybrid laptops. */
-static char *boot_vga_render_node(void) {
+/* The integrated GPU: the one that drives the display (boot_vga=1), or
+ * failing that the first Intel card; nouveau devices are skipped. Returns its render node and PCI slot.
+ * On hybrid laptops the discrete card is often renderD128, i.e. the one
+ * Mesa picks by default (WEBKIT_WEB_RENDER_DEVICE_FILE alone doesn't stop
+ * that: verified via fdinfo, rendering landed on nouveau). */
+static gboolean integrated_gpu(char **node, char **pci) {
+  *node = *pci = NULL;
   GDir *dir = g_dir_open("/sys/class/drm", 0, NULL);
   if (!dir)
-    return NULL;
-  char *found = NULL;
+    return FALSE;
+  char *intel = NULL;
   const char *name;
-  while (!found && (name = g_dir_read_name(dir))) {
+  while (!*node && (name = g_dir_read_name(dir))) {
     if (!g_str_has_prefix(name, "renderD"))
       continue;
+    /* never nouveau: its Mesa driver is what crashed the web process */
+    char *dpath = g_strdup_printf("/sys/class/drm/%s/device/driver", name);
+    char *drv = g_file_read_link(dpath, NULL);
+    gboolean is_nouveau = drv && g_str_has_suffix(drv, "/nouveau");
+    g_free(drv);
+    g_free(dpath);
+    if (is_nouveau)
+      continue;
     char *path = g_strdup_printf("/sys/class/drm/%s/device/boot_vga", name);
-    char *val = NULL;
+    char *vpath = g_strdup_printf("/sys/class/drm/%s/device/vendor", name);
+    char *val = NULL, *vendor = NULL;
     if (g_file_get_contents(path, &val, NULL, NULL) && val[0] == '1')
-      found = g_strdup_printf("/dev/dri/%s", name);
+      *node = g_strdup(name);
+    else if (!intel && g_file_get_contents(vpath, &vendor, NULL, NULL) && g_str_has_prefix(vendor, "0x8086"))
+      intel = g_strdup(name);
     g_free(val);
+    g_free(vendor);
     g_free(path);
+    g_free(vpath);
   }
   g_dir_close(dir);
-  return found;
+  if (!*node)
+    *node = g_steal_pointer(&intel);
+  g_free(intel);
+  if (!*node)
+    return FALSE;
+  char *link = g_strdup_printf("/sys/class/drm/%s/device", *node);
+  char *real = realpath(link, NULL);
+  g_free(link);
+  if (real) {
+    /* DRI_PRIME wants "pci-0000_00_02_0" for slot 0000:00:02.0 */
+    char *slot = g_strdelimit(g_path_get_basename(real), ":.", '_');
+    *pci = g_strdup_printf("pci-%s", slot);
+    g_free(slot);
+    free(real);
+  }
+  char *dev = g_strdup_printf("/dev/dri/%s", *node);
+  g_free(*node);
+  *node = dev;
+  return TRUE;
 }
 
 /* WebKit's web process always creates an EGL context for compositing. By
@@ -1768,11 +1803,20 @@ static void configure_gpu(int use_gpu) {
     g_setenv("LP_NUM_THREADS", "0", FALSE); /* rasterize inline: fewer threads, less RAM */
     return;
   }
-  char *node = boot_vga_render_node();
-  if (node) {
-    g_setenv("WEBKIT_WEB_RENDER_DEVICE_FILE", node, TRUE);
-    g_free(node);
+  char *node, *pci;
+  if (!integrated_gpu(&node, &pci)) {
+    fprintf(stderr, "chatai-webwpe: no integrated GPU found, using software rendering\n");
+    configure_gpu(0);
+    return;
   }
+  /* Both are needed: WebKit's device for buffers, DRI_PRIME so Mesa's EGL
+   * creates its context there and not on the first (discrete) card. */
+  g_setenv("WEBKIT_WEB_RENDER_DEVICE_FILE", node, TRUE);
+  if (pci)
+    g_setenv("DRI_PRIME", pci, TRUE);
+  fprintf(stderr, "chatai-webwpe: GPU rendering on %s (%s)\n", node, pci ? pci : "?");
+  g_free(node);
+  g_free(pci);
 }
 
 /* ------------------------------------------------------------------------ */
