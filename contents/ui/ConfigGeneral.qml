@@ -540,6 +540,20 @@ Action=Popup`
                     text: i18n("Always the integrated GPU (e.g. Intel), never a discrete NVIDIA card, which stays asleep. Uses about half the memory of software drawing. Takes effect the next time the web engine starts.")
                 }
 
+                QQC2.CheckBox {
+                    text: i18n("Low-memory JavaScript")
+                    checked: plasmoid.configuration.lowMemoryJavascript
+                    onToggled: plasmoid.configuration.lowMemoryJavascript = checked
+                }
+
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                    text: i18n("Turns off the JavaScript JIT compiler: about 150–200 MB less on ChatGPT, but pages load and react more slowly. Takes effect the next time the web engine starts.")
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
                     QQC2.Label {

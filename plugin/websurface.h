@@ -45,6 +45,9 @@ class WebSurface : public QQuickItem
     // Render on the integrated GPU (never a discrete/nouveau card) instead of
     // the CPU. Applies on the next engine start.
     Q_PROPERTY(bool gpuRendering READ gpuRendering WRITE setGpuRendering NOTIFY gpuRenderingChanged)
+    // Run JavaScript without the JIT: much less memory, slower scripts.
+    // Applies on the next engine start.
+    Q_PROPERTY(bool javascriptJit READ javascriptJit WRITE setJavascriptJit NOTIFY javascriptJitChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
 
     // page state
@@ -120,6 +123,8 @@ public:
     void setMemoryLimitMb(int mb);
     bool gpuRendering() const { return m_gpuRendering; }
     void setGpuRendering(bool on);
+    bool javascriptJit() const { return m_jsJit; }
+    void setJavascriptJit(bool on);
     QString lastError() const { return m_lastError; }
 
     QUrl url() const { return m_url; }
@@ -178,6 +183,7 @@ Q_SIGNALS:
     void profileDirectoryChanged();
     void memoryLimitMbChanged();
     void gpuRenderingChanged();
+    void javascriptJitChanged();
     void lastErrorChanged();
     void urlChanged();
     void titleChanged();
@@ -272,6 +278,7 @@ private:
     QString m_profileDir;
     int m_memoryLimitMb = 0;
     bool m_gpuRendering = false;
+    bool m_jsJit = true;
     QString m_lastError;
 
     QUrl m_url;

@@ -1878,6 +1878,12 @@ int main(int argc, char **argv) {
   g_shm_pixels = (uint8_t *)map + sizeof(zurf_shm_header);
 
   configure_gpu(arg_flag(argc, argv, "--gpu") || truthy(g_getenv("CHATAI_WEB_GPU")));
+  /* JavaScript interpreter only: chat sites' JIT tiers keep profiling and
+   * compiler data in the malloc heap (measured on a logged-in ChatGPT:
+   * ~150-200 MB less), at the cost of slower scripts. Inherited by the web
+   * process through the environment. */
+  if (arg_flag(argc, argv, "--no-jit"))
+    g_setenv("JSC_useJIT", "0", TRUE);
 
   g_loop = g_main_loop_new(NULL, FALSE);
   g_downloads = g_ptr_array_new_with_free_func(dl_free);

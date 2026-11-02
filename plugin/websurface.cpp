@@ -275,6 +275,14 @@ void WebSurface::setGpuRendering(bool on)
     Q_EMIT gpuRenderingChanged();
 }
 
+void WebSurface::setJavascriptJit(bool on)
+{
+    if (m_jsJit == on)
+        return;
+    m_jsJit = on;
+    Q_EMIT javascriptJitChanged();
+}
+
 void WebSurface::setUrl(const QUrl &url)
 {
     if (!url.isValid() || m_url == url)
@@ -561,6 +569,8 @@ void WebSurface::startEngine()
         args << QStringLiteral("--memory-limit-mb=%1").arg(m_memoryLimitMb);
     if (m_gpuRendering)
         args << QStringLiteral("--gpu");
+    if (!m_jsJit)
+        args << QStringLiteral("--no-jit");
 
     m_process = new QProcess(this);
     m_process->setProgram(engine);
