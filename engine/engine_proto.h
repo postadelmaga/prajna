@@ -193,6 +193,7 @@ enum {
  *   spatial-nav        spatial navigation
  *   new-window-policy  "popup" (auth popups as tabs) | "external" (all to host)
  *   max-fps            frame rate cap (5..240; default 30, also --max-fps)
+ *   transparent        1 = see-through page background (frames carry alpha)
  */
 
 #define ZURF_MSG_MAX (1 << 24) /* 16 MiB: room for a pasted screenshot */

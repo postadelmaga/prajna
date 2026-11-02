@@ -85,6 +85,26 @@ KCM.SimpleKCM {
             Layout.fillWidth: true
         }
 
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Look:")
+            text: i18n("Transparent page background")
+            checked: plasmoid.configuration.transparentBackground
+            onToggled: plasmoid.configuration.transparentBackground = checked
+        }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("The site's background becomes see-through and the blurred desktop shows behind the chat; text boxes, menus and messages keep their colours. Needs the Blur desktop effect for best readability.")
+        }
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Layout.fillWidth: true
+        }
+
         // Header Options section
         QQC2.Label {
             Kirigami.FormData.label: i18n("Header Options")

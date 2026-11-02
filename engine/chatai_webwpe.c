@@ -30,6 +30,7 @@
 #include <wpe/webkit.h>
 #include <wpe/wpe-platform.h>
 
+#include "clear_background_js.h"
 #include "engine_proto.h"
 
 #define MAX_TABS 16
@@ -627,6 +628,8 @@ static void tab_activate(tab_t *tab) {
 }
 
 static tab_t *tab_register(WebKitWebView *view, int opener_id);
+static void tab_apply_transparency(tab_t *tab);
+static int g_transparent; /* see tab_apply_transparency */
 
 static void on_notify_title(GObject *o, GParamSpec *p, gpointer d) {
   (void)p;
@@ -931,6 +934,8 @@ static tab_t *tab_register(WebKitWebView *view, int opener_id) {
   g_signal_connect(fc, "failed-to-find-text", G_CALLBACK(on_failed_to_find), tab);
 
   g_tabs[slot] = tab;
+  if (g_transparent)
+    tab_apply_transparency(tab);
   view_apply_geometry(tab);
   wpe_view_map(tab->wview);
   wpe_view_set_visible(tab->wview, FALSE);
@@ -1424,6 +1429,34 @@ static void set_feature(const char *id, gboolean on) {
 
 static int truthy(const char *v) { return v && (v[0] == '1' || v[0] == 't' || v[0] == 'y'); }
 
+/* Transparent page background: the WebKit base colour is cleared and the
+ * page's own background containers are made see-through by a user script
+ * (clear_background.js), so the blurred Plasma popup shows behind the chat. */
+static void tab_apply_transparency(tab_t *tab) {
+  WebKitWebView *view = tab->view;
+  WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(view);
+  webkit_user_content_manager_remove_all_scripts(ucm);
+  webkit_user_content_manager_remove_all_style_sheets(ucm);
+  WebKitColor bg = {1, 1, 1, g_transparent ? 0 : 1};
+  webkit_web_view_set_background_color(view, &bg);
+  if (g_transparent) {
+    WebKitUserStyleSheet *css = webkit_user_style_sheet_new(
+        "[data-chatai-clear]{background-color:transparent!important}",
+        WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER, NULL, NULL);
+    webkit_user_content_manager_add_style_sheet(ucm, css);
+    webkit_user_style_sheet_unref(css);
+    WebKitUserScript *js = webkit_user_script_new(
+        CLEAR_BACKGROUND_JS, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+        WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, NULL, NULL);
+    webkit_user_content_manager_add_script(ucm, js);
+    webkit_user_script_unref(js);
+  }
+  /* the page already shown: start/stop in place, no reload */
+  webkit_web_view_evaluate_javascript(view,
+      g_transparent ? CLEAR_BACKGROUND_JS : "window.__chataiClear && window.__chataiClear.stop()",
+      -1, NULL, NULL, NULL, NULL, NULL);
+}
+
 static void apply_pref(const char *k, const char *v) {
   if (strcmp(k, "user-agent") == 0) {
     if (v[0])
@@ -1450,6 +1483,13 @@ static void apply_pref(const char *k, const char *v) {
       g_frame_interval_us = 1000000 / fps;
   } else if (strcmp(k, "new-window-policy") == 0) {
     g_popups_as_tabs = strcmp(v, "external") != 0;
+  } else if (strcmp(k, "transparent") == 0) {
+    if (g_transparent != truthy(v)) {
+      g_transparent = truthy(v);
+      for (int i = 0; i < MAX_TABS; i++)
+        if (g_tabs[i])
+          tab_apply_transparency(g_tabs[i]);
+    }
   }
 }
 

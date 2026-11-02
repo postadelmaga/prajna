@@ -49,8 +49,8 @@ Column {
 
             width: parent.width
             height: 40
-            color: Kirigami.Theme.backgroundColor
-            opacity: 0.95
+            color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.88)
+            radius: Kirigami.Units.cornerRadius
 
             RowLayout {
                 anchors.fill: parent
@@ -83,7 +83,7 @@ Column {
                     value: row.progress
                 }
 
-                PlasmaComponents3.Button {
+                PlasmaComponents3.ToolButton {
                     icon.name: "document-open"
                     visible: row.finished
                     PlasmaComponents3.ToolTip.text: i18n("Open file")
@@ -91,7 +91,7 @@ Column {
                     onClicked: Qt.openUrlExternally("file://" + row.fullPath)
                 }
 
-                PlasmaComponents3.Button {
+                PlasmaComponents3.ToolButton {
                     icon.name: "folder-open"
                     visible: row.finished
                     PlasmaComponents3.ToolTip.text: i18n("Open folder")
@@ -99,7 +99,7 @@ Column {
                     onClicked: Qt.openUrlExternally("file://" + row.fullPath.substring(0, row.fullPath.lastIndexOf("/")))
                 }
 
-                PlasmaComponents3.Button {
+                PlasmaComponents3.ToolButton {
                     icon.name: "dialog-cancel"
                     visible: row.inProgress
                     PlasmaComponents3.ToolTip.text: i18n("Cancel")
@@ -107,7 +107,7 @@ Column {
                     onClicked: webviewItem.cancelDownload(row.downloadId)
                 }
 
-                PlasmaComponents3.Button {
+                PlasmaComponents3.ToolButton {
                     icon.name: "dialog-close"
                     visible: !row.inProgress
                     PlasmaComponents3.ToolTip.text: i18n("Close")

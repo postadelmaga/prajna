@@ -310,6 +310,7 @@ WS_PREF_SETTER(setJavascriptCanAccessClipboard, m_jsClipboard, bool)
 WS_PREF_SETTER(setPlaybackRequiresUserGesture, m_mediaGesture, bool)
 WS_PREF_SETTER(setSpatialNavigation, m_spatialNav, bool)
 WS_PREF_SETTER(setPopupsInPlace, m_popupsInPlace, bool)
+WS_PREF_SETTER(setTransparentBackground, m_transparent, bool)
 
 void WebSurface::setMaxFps(int fps)
 {
@@ -964,6 +965,7 @@ void WebSurface::sendPrefs()
     prefs += QByteArray("media-gesture=") + b(m_mediaGesture) + '\n';
     prefs += QByteArray("spatial-nav=") + b(m_spatialNav) + '\n';
     prefs += QByteArray("new-window-policy=") + (m_popupsInPlace ? "popup" : "external") + '\n';
+    prefs += QByteArray("transparent=") + (m_transparent ? "1" : "0") + '\n';
     prefs += "max-fps=" + QByteArray::number(m_maxFps) + '\n';
     send(ZURF_OP_SET_PREFS, prefs);
 }

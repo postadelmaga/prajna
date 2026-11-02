@@ -24,7 +24,8 @@ Rectangle {
 
     visible: findBarVisible
     height: visible ? findBarRow.height + Kirigami.Units.smallSpacing * 2 : 0
-    color: Kirigami.Theme.backgroundColor
+    color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.88)
+    radius: Kirigami.Units.cornerRadius
     z: 5
 
     anchors {
@@ -69,7 +70,7 @@ Rectangle {
             opacity: 0.7
         }
 
-        PlasmaComponents3.Button {
+        PlasmaComponents3.ToolButton {
             icon.name: "go-up"
             display: PlasmaComponents3.AbstractButton.IconOnly
             onClicked: if (webviewItem) webviewItem.findText(findField.text, true)
@@ -78,7 +79,7 @@ Rectangle {
             enabled: findField.text !== ""
         }
 
-        PlasmaComponents3.Button {
+        PlasmaComponents3.ToolButton {
             icon.name: "go-down"
             display: PlasmaComponents3.AbstractButton.IconOnly
             onClicked: if (webviewItem) webviewItem.findText(findField.text)
@@ -87,7 +88,7 @@ Rectangle {
             enabled: findField.text !== ""
         }
 
-        PlasmaComponents3.Button {
+        PlasmaComponents3.ToolButton {
             icon.name: "dialog-close"
             display: PlasmaComponents3.AbstractButton.IconOnly
             PlasmaComponents3.ToolTip.text: i18n("Close")

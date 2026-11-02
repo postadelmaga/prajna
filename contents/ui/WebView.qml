@@ -63,6 +63,10 @@ Item {
         webview.runJavaScript("window.print()");
     }
 
+    // Overlays float over a see-through page: a slightly translucent tint of
+    // the Plasma theme instead of an opaque slab.
+    readonly property color overlayColor: Qt.alpha(Kirigami.Theme.backgroundColor, 0.88)
+
     function isDarkTheme() {
         const color = Kirigami.Theme.backgroundColor;
         return (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b) < 0.5;
@@ -210,6 +214,7 @@ Item {
         memoryLimitMb: plasmoid.configuration.memoryLimitMb
         maxFps: plasmoid.configuration.maxFps
         gpuRendering: plasmoid.configuration.gpuRendering
+        transparentBackground: plasmoid.configuration.transparentBackground
         javascriptJit: !plasmoid.configuration.lowMemoryJavascript
         userAgent: plasmoid.configuration.userAgent || "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15"
         downloadDirectory: webViewRoot.downloadDirectory
@@ -308,7 +313,8 @@ Item {
 
         visible: webview.popupOpen
         height: visible ? popupRow.implicitHeight + Kirigami.Units.smallSpacing * 2 : 0
-        color: Kirigami.Theme.backgroundColor
+        color: webViewRoot.overlayColor
+        radius: Kirigami.Units.cornerRadius
         z: 5
         anchors {
             top: findBar.visible ? findBar.bottom : parent.top
@@ -331,7 +337,7 @@ Item {
                 elide: Text.ElideRight
                 text: webview.title || i18n("Popup window")
             }
-            PlasmaComponents3.Button {
+            PlasmaComponents3.ToolButton {
                 icon.name: "window-close"
                 text: i18n("Close")
                 onClicked: webview.closePopup()
@@ -339,20 +345,26 @@ Item {
         }
     }
 
-    PlasmaComponents3.ProgressBar {
+    // Thin accent line while loading.
+    Rectangle {
         id: loadingProgressBar
 
         z: 10
         visible: webview.loading && webview.loadProgress < 100
-        height: visible ? 3 : 0
+        height: 2
+        radius: 1
+        color: Kirigami.Theme.highlightColor
         anchors {
             top: webview.top
             left: parent.left
-            right: parent.right
         }
-        from: 0
-        to: 100
-        value: webview.loadProgress
+        width: parent.width * Math.max(0.05, webview.loadProgress / 100)
+
+        Behavior on width {
+            NumberAnimation {
+                duration: Kirigami.Units.shortDuration
+            }
+        }
     }
 
     Rectangle {
@@ -360,19 +372,22 @@ Item {
 
         property int padding: 8
 
-        color: Kirigami.Theme.backgroundColor
+        color: webViewRoot.overlayColor
+        radius: Kirigami.Units.cornerRadius
         visible: webview.hoveredLink !== ""
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        width: Math.min(statusText.implicitWidth + padding, parent.width)
+        anchors.margins: Kirigami.Units.smallSpacing
+        width: Math.min(statusText.implicitWidth + padding * 2, parent.width - Kirigami.Units.smallSpacing * 2)
         height: statusText.implicitHeight + padding
         z: 6
 
         PlasmaComponents3.Label {
             id: statusText
             anchors.centerIn: parent
-            width: parent.width - parent.padding
+            width: parent.width - parent.padding * 2
             elide: Text.ElideMiddle
+            font: Kirigami.Theme.smallFont
             text: webview.hoveredLink
         }
     }

@@ -37,55 +37,40 @@ RowLayout {
         return url.match(/^https?:\/\//i) ? url : "https://" + url;
     }
 
+    spacing: Kirigami.Units.smallSpacing / 2
+
+    // Flat, icon-only header button with a tooltip.
+    component HeaderButton: PlasmaComponents3.ToolButton {
+        property string tip
+        display: PlasmaComponents3.AbstractButton.IconOnly
+        z: 3
+        PlasmaComponents3.ToolTip.text: tip
+        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
+        PlasmaComponents3.ToolTip.visible: hovered && tip !== ""
+    }
+
     // Navigation buttons
-    PlasmaComponents3.Button {
+    HeaderButton {
         icon.name: "go-previous"
-        display: PlasmaComponents3.AbstractButton.IconOnly
+        tip: i18n("Go back to previous page")
+        enabled: !webview || webview.canGoBack
+        visible: !plasmoid.configuration.hideNavigationButtons
         onClicked: navigateBackRequested()
-        visible: !plasmoid.configuration.hideNavigationButtons
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Go back to previous page")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
     }
 
-    PlasmaComponents3.Button {
+    HeaderButton {
         icon.name: "go-next"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        onClicked: navigateForwardRequested()
+        tip: i18n("Go forward to next page")
+        enabled: !webview || webview.canGoForward
         visible: !plasmoid.configuration.hideNavigationButtons
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Go forward to next page")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
-    }
-
-    PlasmaComponents3.Button {
-        icon.name: "go-home"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        onClicked: goBackToHomePage()
-        visible: !plasmoid.configuration.hideHomeButton
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Return to homepage/default chat")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
-    }
-
-    PlasmaComponents3.Button {
-        icon.name: "view-refresh"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        onClicked: reloadPageRequested()
-        visible: !plasmoid.configuration.hideRefreshButton
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Reload current page")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
+        onClicked: navigateForwardRequested()
     }
 
     // URL Selection components
     PlasmaComponents3.ComboBox {
         id: urlComboBox
         Layout.fillWidth: true
+        flat: !editable
         PlasmaComponents3.ToolTip.text: i18n("Select or enter chat website URL")
         PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
         PlasmaComponents3.ToolTip.visible: hovered && !pressed
@@ -142,43 +127,76 @@ RowLayout {
         Component.onCompleted: renderChatModel()
     }
 
-    // Auto-Hide Button
-    PlasmaComponents3.Button {
-        id: autoHideButton
-        visible: !plasmoid.configuration.hidePrintButton
-        icon.name: plasmoid.configuration.autoHideHeader ? "view-visible" : "view-hidden"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        checkable: true
-        checked: plasmoid.configuration.autoHideHeader
-        z: 3
-        PlasmaComponents3.ToolTip.text: checked ? i18n("Header will hide automatically when not in use") : i18n("Header will stay visible")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
-        onToggled: plasmoid.configuration.autoHideHeader = checked
+    // Search button - Toggles the find bar
+    HeaderButton {
+        icon.name: "search"
+        tip: i18n("Find in page (Ctrl+F)")
+        onClicked: toggleSearchRequested()
     }
 
-    // Download button with dropdown menu
-    // Provides access to download folder management
-    PlasmaComponents3.Button {
-        icon.name: "folder-download"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        onClicked: downloadMenu.popup()
-        visible: !plasmoid.configuration.hideDownloadButton
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Manage downloads and download folder")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
+    // Pin button - Keeps the widget open when focused is lost
+    HeaderButton {
+        icon.name: "window-pin"
+        checkable: true
+        checked: Boolean(plasmoid.configuration.pin)
+        onToggled: plasmoid.configuration.pin = checked
+        visible: !Boolean(plasmoid.configuration.hideKeepOpen)
+        tip: checked ? i18n("Widget will stay open when clicking outside") : i18n("Widget will close when clicking outside")
+    }
+
+    // Less frequent actions live in an overflow menu to keep the bar light.
+    HeaderButton {
+        id: moreButton
+        icon.name: "overflow-menu"
+        tip: i18n("More actions")
+        visible: homeItem.visible || reloadItem.visible || autoHideItem.visible || !plasmoid.configuration.hideDownloadButton
+        onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
 
         PlasmaComponents3.Menu {
-            id: downloadMenu
+            id: moreMenu
+
+            PlasmaComponents3.MenuItem {
+                id: homeItem
+                icon.name: "go-home"
+                text: i18n("Return to homepage")
+                visible: !plasmoid.configuration.hideHomeButton
+                height: visible ? implicitHeight : 0
+                onTriggered: goBackToHomePage()
+            }
+            PlasmaComponents3.MenuItem {
+                id: reloadItem
+                icon.name: "view-refresh"
+                text: i18n("Reload page")
+                visible: !plasmoid.configuration.hideRefreshButton
+                height: visible ? implicitHeight : 0
+                onTriggered: reloadPageRequested()
+            }
+            PlasmaComponents3.MenuItem {
+                id: autoHideItem
+                icon.name: "view-visible"
+                text: i18n("Auto-hide this bar")
+                checkable: true
+                checked: plasmoid.configuration.autoHideHeader
+                visible: !plasmoid.configuration.hidePrintButton
+                height: visible ? implicitHeight : 0
+                onToggled: plasmoid.configuration.autoHideHeader = checked
+            }
+            PlasmaComponents3.MenuSeparator {
+                visible: !plasmoid.configuration.hideDownloadButton
+                height: visible ? implicitHeight : 0
+            }
             PlasmaComponents3.MenuItem {
                 icon.name: "folder-open"
                 text: i18n("Open Download Folder")
+                visible: !plasmoid.configuration.hideDownloadButton
+                height: visible ? implicitHeight : 0
                 onTriggered: Qt.openUrlExternally(plasmoid.configuration.downloadPath?.replace(/^file:\/+/, '/') || StandardPaths.writableLocation(StandardPaths.DownloadLocation))
             }
             PlasmaComponents3.MenuItem {
-                icon.name: "folder"
-                text: i18n("Choose Download Folder")
+                icon.name: "folder-download"
+                text: i18n("Choose Download Folder…")
+                visible: !plasmoid.configuration.hideDownloadButton
+                height: visible ? implicitHeight : 0
                 onTriggered: folderDialog.open()
             }
         }
@@ -191,43 +209,12 @@ RowLayout {
         onAccepted: plasmoid.configuration.downloadPath = selectedFolder
     }
 
-    // Search button - Toggles the find bar
-    PlasmaComponents3.Button {
-        icon.name: "search"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        onClicked: toggleSearchRequested()
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Find in page (Ctrl+F)")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
-    }
-
-    // Pin button - Keeps the widget open when focused is lost
-    PlasmaComponents3.Button {
-        icon.name: "window-pin"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        checkable: true
-        checked: Boolean(plasmoid.configuration.keepOpen)
-        onToggled: plasmoid.configuration.pin = checked
-        visible: !Boolean(plasmoid.configuration.hideKeepOpen)
-        z: 3
-        PlasmaComponents3.ToolTip.text: checked ? i18n("Widget will stay open when clicking outside") : i18n("Widget will close when clicking outside")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
-    }
-
     // Close button - Closes the webview and collapses the widget
-    PlasmaComponents3.Button {
+    HeaderButton {
         icon.name: "window-close"
-        display: PlasmaComponents3.AbstractButton.IconOnly
-        onClicked: {
-            closeWebViewCallback?.();
-        }
+        tip: i18n("Close the webview and release memory")
         visible: !plasmoid.configuration.hideCloseButton
-        z: 3
-        PlasmaComponents3.ToolTip.text: i18n("Close the webview and release memory")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered
+        onClicked: closeWebViewCallback?.()
     }
 
     // Helper Functions

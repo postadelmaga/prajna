@@ -72,6 +72,9 @@ class WebSurface : public QQuickItem
     Q_PROPERTY(bool playbackRequiresUserGesture READ playbackRequiresUserGesture WRITE setPlaybackRequiresUserGesture NOTIFY prefsChanged)
     Q_PROPERTY(bool spatialNavigation READ spatialNavigation WRITE setSpatialNavigation NOTIFY prefsChanged)
     Q_PROPERTY(bool popupsInPlace READ popupsInPlace WRITE setPopupsInPlace NOTIFY prefsChanged)
+    // See-through page background: the site's own background containers are
+    // cleared, so whatever is behind the item (the blurred popup) shows.
+    Q_PROPERTY(bool transparentBackground READ transparentBackground WRITE setTransparentBackground NOTIFY prefsChanged)
     // Each frame costs a full software composite in WebKit: lower = less CPU
     // during animations and streaming answers.
     Q_PROPERTY(int maxFps READ maxFps WRITE setMaxFps NOTIFY prefsChanged)
@@ -153,6 +156,8 @@ public:
     bool spatialNavigation() const { return m_spatialNav; }
     void setSpatialNavigation(bool on);
     bool popupsInPlace() const { return m_popupsInPlace; }
+    bool transparentBackground() const { return m_transparent; }
+    void setTransparentBackground(bool on);
     void setPopupsInPlace(bool on);
     int maxFps() const { return m_maxFps; }
     void setMaxFps(int fps);
@@ -299,6 +304,7 @@ private:
     bool m_mediaGesture = false;
     bool m_spatialNav = false;
     bool m_popupsInPlace = true;
+    bool m_transparent = false;
     int m_maxFps = 30;
 
     QSize m_sentSize;
