@@ -34,7 +34,6 @@
 
 #define MAX_TABS 16
 #define MAX_PENDING 64
-#define FRAME_INTERVAL_US 16666
 
 /* ------------------------------------------------------------------------ */
 /* global state                                                             */
@@ -65,6 +64,9 @@ static int g_ctl = 3;
 static int g_width = 1000, g_height = 700; /* logical */
 static double g_scale = 1.0;
 static int g_frame_events;
+/* Frame pacing. Every frame costs WebKit a full composite + readback in
+ * software, so a panel widget defaults to 30 fps (--max-fps). */
+static gint64 g_frame_interval_us = 1000000 / 30;
 static int g_visible = 1;
 static int g_focused;
 static GMainLoop *g_loop;
@@ -142,41 +144,97 @@ static void send_str(uint8_t op, const char *s) {
 /* ------------------------------------------------------------------------ */
 /* frame plane                                                              */
 
-static void publish_pixels(const uint8_t *src, int w, int h, int stride) {
+typedef struct rect {
+  int x, y, w, h;
+} rect_t;
+
+static int rect_empty(rect_t r) { return r.w <= 0 || r.h <= 0; }
+
+static rect_t rect_union(rect_t a, rect_t b) {
+  if (rect_empty(a))
+    return b;
+  if (rect_empty(b))
+    return a;
+  int x0 = MIN(a.x, b.x), y0 = MIN(a.y, b.y);
+  int x1 = MAX(a.x + a.w, b.x + b.w), y1 = MAX(a.y + a.h, b.y + b.h);
+  return (rect_t){x0, y0, x1 - x0, y1 - y0};
+}
+
+static rect_t rect_clip(rect_t r, int w, int h) {
+  int x0 = MAX(r.x, 0), y0 = MAX(r.y, 0);
+  int x1 = MIN(r.x + r.w, w), y1 = MIN(r.y + r.h, h);
+  return (rect_t){x0, y0, MAX(0, x1 - x0), MAX(0, y1 - y0)};
+}
+
+/* Damage bookkeeping for the two slots. A slot is always kept as a COMPLETE
+ * frame, so the host can copy it whole at any time; but bringing the stale
+ * slot (two frames old) up to date only needs the damage of the last two
+ * frames, which while typing or streaming text is a few percent of it. */
+static int g_slot_w[2], g_slot_h[2];
+static rect_t g_prev_damage;
+static int g_force_full = 1;
+
+static void publish_pixels(const uint8_t *src, int w, int h, int stride, rect_t damage) {
   if (!g_shm || w <= 0 || h <= 0)
     return;
   if (w > ZURF_SHM_MAX_W)
     w = ZURF_SHM_MAX_W;
   if (h > ZURF_SHM_MAX_H)
     h = ZURF_SHM_MAX_H;
+  rect_t full = {0, 0, w, h};
+  damage = g_force_full ? full : rect_clip(damage, w, h);
+
   uint32_t seq = __atomic_load_n(&g_shm->seq, __ATOMIC_RELAXED);
-  uint8_t *dst = g_shm_pixels + (((seq / 2) + 1) % 2) * ZURF_SHM_SLOT_SIZE;
+  int slot = (int)(((seq / 2) + 1) % 2);
+  uint8_t *dst = g_shm_pixels + (size_t)slot * ZURF_SHM_SLOT_SIZE;
   size_t row = (size_t)w * 4;
-  if ((size_t)stride == row) {
-    memcpy(dst, src, row * (size_t)h);
+
+  rect_t copy = (g_slot_w[slot] == w && g_slot_h[slot] == h) ? rect_union(damage, g_prev_damage) : full;
+  copy = rect_clip(copy, w, h);
+  if (copy.w == w && (size_t)stride == row) {
+    memcpy(dst + row * (size_t)copy.y, src + row * (size_t)copy.y, row * (size_t)copy.h);
   } else {
-    for (int y = 0; y < h; y++)
-      memcpy(dst + row * (size_t)y, src + (size_t)stride * (size_t)y, row);
+    size_t off = (size_t)copy.x * 4, len = (size_t)copy.w * 4;
+    for (int y = copy.y; y < copy.y + copy.h; y++)
+      memcpy(dst + row * (size_t)y + off, src + (size_t)stride * (size_t)y + off, len);
   }
+  g_slot_w[slot] = w;
+  g_slot_h[slot] = h;
+  g_prev_damage = damage;
+  g_force_full = 0;
+
   __atomic_store_n(&g_shm->seq, seq | 1u, __ATOMIC_RELEASE);
   __atomic_thread_fence(__ATOMIC_RELEASE);
   g_shm->width = (uint32_t)w;
   g_shm->height = (uint32_t)h;
   __atomic_store_n(&g_shm->seq, (seq | 1u) + 1u, __ATOMIC_RELEASE);
-  if (g_frame_events)
-    send_event(ZURF_EV_FRAME, NULL, 0);
+  if (g_frame_events) {
+    int32_t d[4] = {damage.x, damage.y, damage.w, damage.h};
+    send_event(ZURF_EV_FRAME, d, sizeof(d));
+  }
 }
 
-static void publish_buffer(WPEBuffer *buffer) {
+/* Bounding box of WebKit's damage (device pixels); none = whole frame. */
+static rect_t damage_bbox(const WPERectangle *damage, guint n, int w, int h) {
+  if (!damage || n == 0)
+    return (rect_t){0, 0, w, h};
+  rect_t r = {0, 0, 0, 0};
+  for (guint i = 0; i < n; i++)
+    r = rect_union(r, (rect_t){damage[i].x, damage[i].y, damage[i].width, damage[i].height});
+  return r;
+}
+
+static void publish_buffer(WPEBuffer *buffer, const WPERectangle *damage, guint n_damage) {
   int w = wpe_buffer_get_width(buffer);
   int h = wpe_buffer_get_height(buffer);
+  rect_t dmg = damage_bbox(damage, n_damage, w, h);
   if (WPE_IS_BUFFER_SHM(buffer)) {
     GBytes *data = wpe_buffer_shm_get_data(WPE_BUFFER_SHM(buffer));
     guint stride = wpe_buffer_shm_get_stride(WPE_BUFFER_SHM(buffer));
     gsize size = 0;
     const uint8_t *px = g_bytes_get_data(data, &size);
     if (px && size >= (gsize)stride * (gsize)h)
-      publish_pixels(px, w, h, (int)stride);
+      publish_pixels(px, w, h, (int)stride, dmg);
     return;
   }
   /* Not expected (we advertise no DRM device), but stay correct. */
@@ -186,7 +244,7 @@ static void publish_buffer(WPEBuffer *buffer) {
     gsize size = 0;
     const uint8_t *p = g_bytes_get_data(px, &size);
     if (size >= (gsize)w * 4 * (gsize)h)
-      publish_pixels(p, w, h, w * 4);
+      publish_pixels(p, w, h, w * 4, dmg);
   } else if (err) {
     g_warning("import_to_pixels: %s", err->message);
     g_error_free(err);
@@ -282,13 +340,11 @@ static gboolean z_view_tick(gpointer data) {
 static gboolean z_view_render_buffer(WPEView *view, WPEBuffer *buffer,
                                      const WPERectangle *damage, guint n_damage,
                                      GError **error) {
-  (void)damage;
-  (void)n_damage;
   (void)error;
   ZView *zv = Z_VIEW(view);
   tab_t *tab = tab_of_wview(view);
   if (tab && tab == g_active)
-    publish_buffer(buffer);
+    publish_buffer(buffer, damage, n_damage);
 
   if (zv->pending) { /* shouldn't happen, but never leak a buffer */
     wpe_view_buffer_rendered(view, zv->pending);
@@ -298,7 +354,7 @@ static gboolean z_view_render_buffer(WPEView *view, WPEBuffer *buffer,
   zv->pending = g_object_ref(buffer);
   if (!zv->tick_source) {
     gint64 elapsed = g_get_monotonic_time() - zv->last_tick_us;
-    guint delay_ms = elapsed >= FRAME_INTERVAL_US ? 0 : (guint)((FRAME_INTERVAL_US - elapsed) / 1000);
+    guint delay_ms = elapsed >= g_frame_interval_us ? 0 : (guint)((g_frame_interval_us - elapsed) / 1000);
     zv->tick_source = g_timeout_add(delay_ms, z_view_tick, zv);
   }
   return TRUE;
@@ -559,6 +615,7 @@ static void tab_activate(tab_t *tab) {
     return;
   tab_set_visible(g_active, 0);
   g_active = tab;
+  g_force_full = 1;
   if (tab) {
     tab_set_visible(tab, g_visible);
     send_tab_str(ZURF_EV_TITLE, tab->id, webkit_web_view_get_title(tab->view));
@@ -1387,6 +1444,10 @@ static void apply_pref(const char *k, const char *v) {
     webkit_settings_set_media_playback_requires_user_gesture(g_settings, truthy(v));
   } else if (strcmp(k, "spatial-nav") == 0) {
     webkit_settings_set_enable_spatial_navigation(g_settings, truthy(v));
+  } else if (strcmp(k, "max-fps") == 0) {
+    int fps = atoi(v);
+    if (fps >= 5 && fps <= 240)
+      g_frame_interval_us = 1000000 / fps;
   } else if (strcmp(k, "new-window-policy") == 0) {
     g_popups_as_tabs = strcmp(v, "external") != 0;
   }
@@ -1741,6 +1802,9 @@ int main(int argc, char **argv) {
   const char *fd_s = arg_value(argc, argv, "--zurf-control-fd");
   const char *scale_s = arg_value(argc, argv, "--zurf-scale");
   const char *mem_s = arg_value(argc, argv, "--memory-limit-mb");
+  const char *fps_s = arg_value(argc, argv, "--max-fps");
+  if (fps_s && atoi(fps_s) >= 5 && atoi(fps_s) <= 240)
+    g_frame_interval_us = 1000000 / atoi(fps_s);
   g_frame_events = arg_flag(argc, argv, "--zurf-frame-events");
   if (!shm_path || !cache_dir) {
     fprintf(stderr, "chatai-webwpe: missing --zurf-shm / --zurf-cache\n");
@@ -1825,6 +1889,9 @@ int main(int argc, char **argv) {
   webkit_settings_set_javascript_can_open_windows_automatically(g_settings, TRUE);
   webkit_settings_set_media_playback_requires_user_gesture(g_settings, FALSE);
   webkit_settings_set_enable_developer_extras(g_settings, FALSE);
+  /* Popup closed → page hidden: throttle its JS timers hard. */
+  set_feature("HiddenPageDOMTimerThrottling", TRUE);
+  set_feature("HiddenPageDOMTimerThrottlingAutoIncreases", TRUE);
   /* Footprint: one web process for everything (pages, iframes, popups),
    * no process swap on cross-site navigation (which leaves the old process
    * cached), no back/forward cache. A chat widget has one page; the
@@ -1834,6 +1901,11 @@ int main(int argc, char **argv) {
     set_feature("UsesSingleWebProcess", TRUE);
     set_feature("ProcessSwapOnCrossSiteNavigation", FALSE);
     set_feature("UsesBackForwardCache", FALSE);
+    /* COOP forces a process swap on sites like ChatGPT, Gemini and Claude
+     * and WebKit keeps the original ~75 MB process alive. None of them
+     * need cross-origin isolation here (crossOriginIsolated is already
+     * false), so one process is enough. */
+    set_feature("CrossOriginOpenerPolicy", FALSE);
   }
 
   if (!tab_new(url && url[0] ? url : "about:blank")) {

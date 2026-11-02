@@ -13,6 +13,7 @@
 #include <QPointer>
 #include <QQuickItem>
 #include <QUrl>
+#include <atomic>
 #include <QtQml/qqmlregistration.h>
 
 class QProcess;
@@ -52,6 +53,9 @@ class WebSurface : public QQuickItem
     Q_PROPERTY(bool canGoForward READ canGoForward NOTIFY loadStateChanged)
     Q_PROPERTY(QString hoveredLink READ hoveredLink NOTIFY hoveredLinkChanged)
     Q_PROPERTY(bool popupOpen READ isPopupOpen NOTIFY popupOpenChanged)
+    // Diagnostic: a frame copy is held in this process (false while the view
+    // is hidden: the copy is released, the engine keeps the frame).
+    Q_PROPERTY(bool frameResident READ isFrameResident)
 
     // preferences (applied live)
     Q_PROPERTY(QString userAgent READ userAgent WRITE setUserAgent NOTIFY prefsChanged)
@@ -62,6 +66,9 @@ class WebSurface : public QQuickItem
     Q_PROPERTY(bool playbackRequiresUserGesture READ playbackRequiresUserGesture WRITE setPlaybackRequiresUserGesture NOTIFY prefsChanged)
     Q_PROPERTY(bool spatialNavigation READ spatialNavigation WRITE setSpatialNavigation NOTIFY prefsChanged)
     Q_PROPERTY(bool popupsInPlace READ popupsInPlace WRITE setPopupsInPlace NOTIFY prefsChanged)
+    // Each frame costs a full software composite in WebKit: lower = less CPU
+    // during animations and streaming answers.
+    Q_PROPERTY(int maxFps READ maxFps WRITE setMaxFps NOTIFY prefsChanged)
 
 public:
     enum Permission {
@@ -119,6 +126,7 @@ public:
     bool canGoForward() const { return m_canGoForward; }
     QString hoveredLink() const { return m_hoveredLink; }
     bool isPopupOpen() const { return m_tabs.size() > 1; }
+    bool isFrameResident() const { return m_frameResident.load(); }
 
     QString userAgent() const { return m_userAgent; }
     void setUserAgent(const QString &ua);
@@ -136,6 +144,8 @@ public:
     void setSpatialNavigation(bool on);
     bool popupsInPlace() const { return m_popupsInPlace; }
     void setPopupsInPlace(bool on);
+    int maxFps() const { return m_maxFps; }
+    void setMaxFps(int fps);
 
     Q_INVOKABLE void load(const QUrl &url);
     Q_INVOKABLE void goBack();
@@ -238,10 +248,14 @@ private:
     int m_crashCount = 0;
 
     // frame
-    QImage m_frame;
+    QImage m_frame;               // last frame, device pixels (render thread)
     quint32 m_frameSeq = 0;
-    bool m_frameDirty = false;
+    bool m_frameDirty = false;    // a new frame (or a full re-copy) is wanted
     bool m_textureDirty = false;
+    QRect m_pendingDamage;        // reported by the engine, not yet copied
+    bool m_pendingFull = true;    // next copy must take the whole frame
+    QRect m_uploadRegion;         // copied into m_frame, not yet uploaded
+    std::atomic<bool> m_frameResident{false};
 
     // state
     bool m_active = true;
@@ -271,6 +285,7 @@ private:
     bool m_mediaGesture = false;
     bool m_spatialNav = false;
     bool m_popupsInPlace = true;
+    int m_maxFps = 30;
 
     QSize m_sentSize;
     int m_sentScale = 0;

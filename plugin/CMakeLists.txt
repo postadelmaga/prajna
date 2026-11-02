@@ -6,10 +6,10 @@
 # QML_IMPORT_PATH tweaks.
 ecm_add_qml_module(chataiwebplugin URI "org.kde.plasma.private.chatai" GENERATE_PLUGIN_SOURCE)
 
-target_sources(chataiwebplugin PRIVATE websurface.cpp websurface.h)
+target_sources(chataiwebplugin PRIVATE websurface.cpp websurface.h frametexture.cpp frametexture.h)
 target_compile_definitions(chataiwebplugin PRIVATE
     CHATAI_ENGINE_BUILD_PATH="$<TARGET_FILE:chatai-webwpe>")
-target_link_libraries(chataiwebplugin PRIVATE Qt::Quick Qt::Qml Qt::Gui PkgConfig::XKBCOMMON ${CMAKE_DL_LIBS})
+target_link_libraries(chataiwebplugin PRIVATE Qt::Quick Qt::Qml Qt::Gui Qt::GuiPrivate PkgConfig::XKBCOMMON ${CMAKE_DL_LIBS})
 add_dependencies(chataiwebplugin chatai-webwpe)
 
 install(TARGETS chataiwebplugin LIBRARY DESTINATION ${CHATAI_PACKAGE_LIBDIR})

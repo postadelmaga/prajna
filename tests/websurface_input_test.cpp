@@ -18,6 +18,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <rhi/qrhi.h>
 
 #include <xkbcommon/xkbcommon-keysyms.h>
 
@@ -91,9 +92,14 @@ private Q_SLOTS:
     void typing()
     {
         // click into the textarea → focus both in Qt and in the page
-        QTest::mouseClick(m_window, Qt::LeftButton, Qt::NoModifier, QPoint(50, 50));
-        QTest::qWait(200);
-        QCOMPARE(js(QStringLiteral("document.activeElement.id")), QStringLiteral("t"));
+        QVERIFY(QTest::qWaitFor([&] { return js(QStringLiteral("document.readyState")) == QLatin1String("complete"); }, 5000));
+        bool focused = false;
+        for (int i = 0; i < 5 && !focused; ++i) {
+            QTest::mouseClick(m_window, Qt::LeftButton, Qt::NoModifier, QPoint(50, 50));
+            QTest::qWait(150);
+            focused = js(QStringLiteral("document.activeElement.id")) == QLatin1String("t");
+        }
+        QVERIFY2(focused, "click did not focus the textarea");
 
         // keycodes are evdev+8 (XKB), as Qt reports them on Wayland
         key(XKB_KEY_c, 54, Qt::Key_C, QStringLiteral("c"));
@@ -136,6 +142,56 @@ private Q_SLOTS:
         const QImage grab = m_window->grabWindow();
         QVERIFY(!grab.isNull());
         QCOMPARE(grab.pixelColor(390, 290).alpha(), 255);
+    }
+
+    void partialUpdatesMatchFullCopy()
+    {
+        qInfo() << "scene graph:" << (m_window->rhi() ? m_window->rhi()->backendName() : "software");
+        // Many small random repaints → damage-limited copies and uploads.
+        m_web->setProperty("testResult", QVariant());
+        QMetaObject::invokeMethod(m_web, "load", Q_ARG(QUrl, QUrl(QStringLiteral(
+            "data:text/html,<body style='margin:0;font:14px sans-serif'><div id=g style='display:grid;grid-template-columns:repeat(8,48px)'></div>"
+            "<script>const g=document.getElementById('g');const c=[];for(let i=0;i<64;i++){const d=document.createElement('div');"
+            "d.style.height='30px';d.textContent='.';g.appendChild(d);c.push(d);}let s=0,seed=7;const r=()=>(seed=(seed*16807)%2147483647)/2147483647;"
+            "const t=setInterval(()=>{for(let k=0;k<3;k++){const e=c[Math.floor(r()*64)];e.textContent=String(s%97);"
+            "e.style.background='hsl('+(s*37%360)+' 60% 70%)';}if(++s==120){clearInterval(t);document.title='done';}},12);</script>"))));
+        QVERIFY(QTest::qWaitFor([&] { return m_web->property("title").toString() == QLatin1String("done"); }, 15000));
+        QTest::qWait(500);
+        const QImage partial = m_window->grabWindow();
+
+        // Hide/show drops the frame and texture and re-copies them whole.
+        QVERIFY(m_web->property("frameResident").toBool());
+        m_web->setProperty("suspended", true);
+        QVERIFY(QTest::qWaitFor([&] { return !m_web->property("frameResident").toBool(); }, 3000));
+        m_web->setProperty("suspended", false);
+        QVERIFY(QTest::qWaitFor([&] { return m_web->property("frameResident").toBool(); }, 3000));
+        QTest::qWait(200);
+        const QImage full = m_window->grabWindow();
+
+        if (partial != full && qEnvironmentVariableIsSet("CHATAI_TEST_DUMP")) {
+            partial.save(qEnvironmentVariable("CHATAI_TEST_DUMP") + QStringLiteral("/partial.png"));
+            full.save(qEnvironmentVariable("CHATAI_TEST_DUMP") + QStringLiteral("/full.png"));
+            QRect diff;
+            for (int y = 0; y < qMin(partial.height(), full.height()); ++y)
+                for (int x = 0; x < qMin(partial.width(), full.width()); ++x)
+                    if (partial.pixel(x, y) != full.pixel(x, y))
+                        diff |= QRect(x, y, 1, 1);
+            qWarning() << "diff region" << diff << "sizes" << partial.size() << full.size();
+        }
+        QCOMPARE(partial.size(), full.size());
+        QVERIFY2(partial == full, "partial updates diverged from a full copy");
+    }
+
+    void quickHideShowKeepsFrame()
+    {
+        // Hide immediately followed by show, before a render can happen:
+        // the frame must stay visible (regression: the item went blank).
+        const QImage before = m_window->grabWindow();
+        m_web->setProperty("suspended", true);
+        m_web->setProperty("suspended", false);
+        QTest::qWait(300);
+        QVERIFY(m_web->property("frameResident").toBool());
+        QVERIFY2(m_window->grabWindow() == before, "quick hide/show left the view blank");
     }
 };
 

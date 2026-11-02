@@ -130,7 +130,11 @@ enum {
   ZURF_EV_JS_RESULT = 70,  /* i32 request id + utf-8 ("" on error) */
 
   /* -- extensions -- */
-  ZURF_EV_FRAME = 96,            /* - new frame published (--zurf-frame-events) */
+  ZURF_EV_FRAME = 96,            /* new frame published (--zurf-frame-events):
+                                  * 4x i32 (x, y, w, h) device-pixel bounding box
+                                  * of what changed since the previous frame;
+                                  * empty payload = whole frame. Both slots
+                                  * always hold complete frames. */
   ZURF_EV_CURSOR = 97,           /* utf-8 CSS cursor name */
   ZURF_EV_FILE_CHOOSER = 98,     /* 2x i32 (request id, multiple) + utf-8
                                   * ','-separated accepted MIME types */
@@ -188,6 +192,7 @@ enum {
  *   media-gesture      media playback requires a user gesture
  *   spatial-nav        spatial navigation
  *   new-window-policy  "popup" (auth popups as tabs) | "external" (all to host)
+ *   max-fps            frame rate cap (5..240; default 30, also --max-fps)
  */
 
 #define ZURF_MSG_MAX (1 << 24) /* 16 MiB: room for a pasted screenshot */

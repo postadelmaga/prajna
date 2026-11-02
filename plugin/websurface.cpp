@@ -7,6 +7,7 @@
 #include "websurface.h"
 
 #include "../engine/engine_proto.h"
+#include "frametexture.h"
 
 #include <QBuffer>
 #include <QClipboard>
@@ -46,6 +47,10 @@ namespace
 constexpr int kMaxCrashRestarts = 5;
 constexpr qsizetype kMaxClipboardBytes = 15 * 1024 * 1024;
 
+// GCC flags the shared-null QByteArray path as out of bounds even though
+// the size check guards it.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
 qint32 readI32(const QByteArray &b, int index)
 {
     qint32 v = 0;
@@ -61,6 +66,7 @@ qint64 readI64(const QByteArray &b, int offset)
         memcpy(&v, b.constData() + offset, 8);
     return qFromLittleEndian(v);
 }
+#pragma GCC diagnostic pop
 
 void appendI32(QByteArray &b, qint32 v)
 {
@@ -288,6 +294,16 @@ WS_PREF_SETTER(setJavascriptCanAccessClipboard, m_jsClipboard, bool)
 WS_PREF_SETTER(setPlaybackRequiresUserGesture, m_mediaGesture, bool)
 WS_PREF_SETTER(setSpatialNavigation, m_spatialNav, bool)
 WS_PREF_SETTER(setPopupsInPlace, m_popupsInPlace, bool)
+
+void WebSurface::setMaxFps(int fps)
+{
+    fps = qBound(5, fps, 240);
+    if (m_maxFps == fps)
+        return;
+    m_maxFps = fps;
+    Q_EMIT prefsChanged();
+    sendPrefs();
+}
 #undef WS_PREF_SETTER
 
 void WebSurface::setDownloadDirectory(const QString &dir)
@@ -529,6 +545,7 @@ void WebSurface::startEngine()
         QStringLiteral("--zurf-h=%1").arg(logical.height() > 1 ? logical.height() : 600),
         QStringLiteral("--zurf-scale=%1").arg(qRound(dpr * 100)),
         QStringLiteral("--zurf-frame-events"),
+        QStringLiteral("--max-fps=%1").arg(m_maxFps),
     };
     if (m_url.isValid())
         args << QStringLiteral("--zurf-url=%1").arg(QString::fromUtf8(m_url.toEncoded()));
@@ -562,6 +579,8 @@ void WebSurface::startEngine()
     m_writeNotifier->setEnabled(false);
     connect(m_writeNotifier, &QSocketNotifier::activated, this, &WebSurface::onWritable);
 
+    m_pendingFull = true;
+    m_pendingDamage = QRect();
     m_sentSize = logical;
     m_sentScale = qRound(dpr * 100);
     m_sentVisible = -1;
@@ -760,6 +779,10 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
         Q_EMIT runningChanged();
         break;
     case ZURF_EV_FRAME:
+        if (p.size() >= 16)
+            m_pendingDamage |= QRect(readI32(p, 0), readI32(p, 1), readI32(p, 2), readI32(p, 3));
+        else
+            m_pendingFull = true;
         m_frameDirty = true;
         update();
         break;
@@ -921,6 +944,7 @@ void WebSurface::sendPrefs()
     prefs += QByteArray("media-gesture=") + b(m_mediaGesture) + '\n';
     prefs += QByteArray("spatial-nav=") + b(m_spatialNav) + '\n';
     prefs += QByteArray("new-window-policy=") + (m_popupsInPlace ? "popup" : "external") + '\n';
+    prefs += "max-fps=" + QByteArray::number(m_maxFps) + '\n';
     send(ZURF_OP_SET_PREFS, prefs);
 }
 
@@ -949,6 +973,21 @@ void WebSurface::sendVisibility()
         return;
     m_sentVisible = visible;
     sendInts(ZURF_OP_SET_VISIBLE, {visible ? 1 : 0});
+    if (!visible) {
+        // Free the host-side frame copy right away: m_frame is only touched
+        // in updatePaintNode, i.e. during sync while this (GUI) thread is
+        // blocked, so this can't race with the render thread. The window may
+        // already be hidden and never render again until shown. The engine
+        // slots keep a complete frame, re-copied whole on show.
+        m_frame = QImage();
+        m_frameResident = false;
+        m_uploadRegion = QRect();
+        m_pendingFull = true;
+        m_frameDirty = true;
+    } else {
+        m_frameDirty = true; // re-copy even if the page doesn't repaint on show
+        update();
+    }
 }
 
 void WebSurface::pushClipboard()
@@ -1007,21 +1046,35 @@ bool WebSurface::copyFrame()
         const quint32 h = __atomic_load_n(&hdr->height, __ATOMIC_RELAXED);
         if (w == 0 || h == 0 || w > ZURF_SHM_MAX_W || h > ZURF_SHM_MAX_H)
             return false;
-        if (m_frame.width() != int(w) || m_frame.height() != int(h))
-            m_frame = QImage(int(w), int(h), QImage::Format_ARGB32_Premultiplied);
+        const QRect whole(0, 0, int(w), int(h));
+        bool full = m_pendingFull;
+        if (m_frame.size() != whole.size()) {
+            m_frame = QImage(whole.size(), QImage::Format_ARGB32_Premultiplied);
+            full = true;
+        }
+        // Both slots always hold complete frames, so copying only what the
+        // engine reported as changed keeps m_frame exact. A frame whose event
+        // hasn't been read yet is caught up when its event arrives.
+        const QRect r = full ? whole : m_pendingDamage.intersected(whole);
+        if (r.isEmpty())
+            return true;
         const uchar *src = slots + size_t((s1 / 2) % 2) * ZURF_SHM_SLOT_SIZE;
         const size_t row = size_t(w) * 4;
-        if (size_t(m_frame.bytesPerLine()) == row) {
-            memcpy(m_frame.bits(), src, row * h);
+        if (r.width() == int(w) && size_t(m_frame.bytesPerLine()) == row) {
+            memcpy(m_frame.scanLine(r.y()), src + row * size_t(r.y()), row * size_t(r.height()));
         } else {
-            for (quint32 y = 0; y < h; ++y)
-                memcpy(m_frame.scanLine(int(y)), src + row * y, row);
+            const size_t off = size_t(r.x()) * 4, len = size_t(r.width()) * 4;
+            for (int y = r.y(); y < r.y() + r.height(); ++y)
+                memcpy(m_frame.scanLine(y) + off, src + row * size_t(y) + off, len);
         }
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         // Accept only if nothing was published meanwhile: then both the
         // header and the slot belong to the same frame.
         if (__atomic_load_n(&hdr->seq, __ATOMIC_ACQUIRE) == s1) {
             m_frameSeq = s1;
+            m_uploadRegion |= r;
+            m_pendingDamage = QRect();
+            m_pendingFull = false;
             return true;
         }
     }
@@ -1031,28 +1084,46 @@ bool WebSurface::copyFrame()
 QSGNode *WebSurface::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
     auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
+    if (m_sentVisible == 0)
+        return node; // hidden: keep what's on the GPU (if anything), copy nothing
     if (m_frameDirty) {
         m_frameDirty = false;
-        if (copyFrame())
-            m_textureDirty = true;
-        else
+        if (!copyFrame()) {
+            m_frameDirty = true;
             QMetaObject::invokeMethod(this, &QQuickItem::update, Qt::QueuedConnection); // retry next frame
+        }
     }
     if (m_frame.isNull() || !window()) {
         delete node;
         return nullptr;
     }
+    QRhi *rhi = window()->rhi();
+    const bool partial = FrameTexture::isSupported(rhi);
+    if (node && partial != bool(qobject_cast<FrameTexture *>(node->texture()))) {
+        delete node; // scene graph backend changed under us
+        node = nullptr;
+    }
     if (!node) {
         node = new QSGSimpleTextureNode;
         node->setOwnsTexture(true);
         node->setFiltering(QSGTexture::Linear);
+        if (partial)
+            node->setTexture(new FrameTexture(rhi));
         m_textureDirty = true;
+        m_uploadRegion = m_frame.rect();
     }
-    if (m_textureDirty) {
-        m_textureDirty = false;
-        QSGTexture *tex = window()->createTextureFromImage(m_frame);
-        node->setTexture(tex); // node owns and deletes the previous one
+    if (partial) {
+        if (!m_uploadRegion.isEmpty() || m_textureDirty) {
+            auto *tex = static_cast<FrameTexture *>(node->texture());
+            tex->setImage(m_frame, m_textureDirty ? m_frame.rect() : m_uploadRegion);
+            node->markDirty(QSGNode::DirtyMaterial);
+        }
+    } else if (m_textureDirty || !m_uploadRegion.isEmpty()) {
+        node->setTexture(window()->createTextureFromImage(m_frame)); // node deletes the old one
     }
+    m_textureDirty = false;
+    m_uploadRegion = QRect();
+    m_frameResident = true;
     // Map device pixels to logical ones; while a resize is in flight the
     // stale frame keeps its size instead of being stretched.
     const qreal dpr = devicePixelRatio();

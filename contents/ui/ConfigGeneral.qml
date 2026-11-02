@@ -529,6 +529,28 @@ Action=Popup`
                 RowLayout {
                     Layout.fillWidth: true
                     QQC2.Label {
+                        text: i18n("Maximum frame rate:")
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                    }
+                    QQC2.ComboBox {
+                        readonly property var rates: [15, 20, 30, 60]
+                        model: rates.map(r => i18n("%1 fps", r))
+                        currentIndex: Math.max(0, rates.indexOf(plasmoid.configuration.maxFps))
+                        onActivated: index => plasmoid.configuration.maxFps = rates[index]
+                    }
+                }
+
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    type: Kirigami.MessageType.Information
+                    visible: true
+                    text: i18n("Pages are drawn without the GPU. Animations (e.g. the \"thinking\" spinner) cost CPU for every frame: 30 fps uses about half the CPU of 60 fps.")
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    QQC2.Label {
                         text: i18n("Memory limit for the web engine:")
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap

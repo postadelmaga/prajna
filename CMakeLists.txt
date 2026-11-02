@@ -18,6 +18,9 @@ include(ECMQmlModule)
 include(FeatureSummary)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core Gui Qml Quick)
+# QRhi (partial texture uploads) is semi-public: <rhi/qrhi.h> lives in the
+# private headers, so the plugin must be rebuilt for each Qt minor release.
+find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WPE REQUIRED IMPORTED_TARGET wpe-webkit-2.0>=2.48 wpe-platform-2.0>=2.48)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
