@@ -67,7 +67,8 @@ KCM.SimpleKCM {
             text: i18n("Blur what is behind the popup")
             checked: page.cfg_blurBehind
             onToggled: page.cfg_blurBehind = checked
-            enabled: blurInfo.available
+            // only the see-through page lets the desktop show
+            enabled: blurInfo.available && page.cfg_transparentBackground
         }
         Hint {
             visible: blurInfo.available && page.cfg_transparentBackground && !page.cfg_blurBehind

@@ -94,9 +94,11 @@ PlasmoidItem {
         Layout.preferredWidth: plasmoid.configuration.dialogWidth > 0 ? plasmoid.configuration.dialogWidth : defaultWidth
         Layout.preferredHeight: plasmoid.configuration.dialogHeight > 0 ? plasmoid.configuration.dialogHeight : defaultHeight
 
-        // Blur behind the popup on/off (Plasma's default is on).
+        // Blur behind the popup on/off (Plasma's default is on). The option
+        // belongs to the see-through page: with an opaque page Plasma's own
+        // popup look applies.
         PopupBlur {
-            blur: plasmoid.configuration.blurBehind
+            blur: plasmoid.configuration.blurBehind || !plasmoid.configuration.transparentBackground
         }
 
         GlassBackground {
