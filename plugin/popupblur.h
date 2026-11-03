@@ -51,7 +51,7 @@ private:
     void attach(QQuickWindow *window);
     void updateAvailable();
     void apply();
-    QObject *findFrame(QQuickItem *item) const;
+    QObject *findFrame(QQuickItem *root) const;
 
     bool m_blur = true;
     bool m_restore = false; // blur was turned back on: re-apply once

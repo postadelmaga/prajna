@@ -68,21 +68,32 @@ void PopupBlur::attach(QQuickWindow *window)
     schedule();
 }
 
-// The dialog background (a KSvg FrameSvgItem with a `mask` property) that
-// Plasma takes the blur shape from.
-QObject *PopupBlur::findFrame(QQuickItem *item) const
+// The dialog background (a KSvg FrameSvgItem drawing "dialogs/background",
+// inside Plasma's DialogBackground) that Plasma takes the blur shape from.
+// Buttons and fields are FrameSvgItems too, so match the image. Plasma
+// creates it only once the popup is laid out: until then there is none.
+static QQuickItem *findDialogFrame(QQuickItem *item)
 {
     if (!item)
         return nullptr;
-    const QMetaObject *mo = item->metaObject();
-    if (mo->indexOfProperty("mask") >= 0 && mo->indexOfSignal("maskChanged()") >= 0
-        && QByteArray(mo->className()).contains("FrameSvgItem"))
+    // QML subclasses (Plasma's DialogBackground.qml) are named after the
+    // QML type: look at the C++ base classes too.
+    bool isFrame = false;
+    for (const QMetaObject *mo = item->metaObject(); mo && !isFrame; mo = mo->superClass())
+        isFrame = QByteArray(mo->className()).contains("FrameSvgItem");
+    if (isFrame && item->metaObject()->indexOfSignal("maskChanged()") >= 0
+        && item->property("imagePath").toString().contains(QLatin1String("dialogs/")))
         return item;
     const auto children = item->childItems();
     for (QQuickItem *child : children)
-        if (QObject *found = findFrame(child))
+        if (QQuickItem *found = findDialogFrame(child))
             return found;
     return nullptr;
+}
+
+QObject *PopupBlur::findFrame(QQuickItem *root) const
+{
+    return findDialogFrame(root);
 }
 
 void PopupBlur::schedule()
@@ -111,15 +122,18 @@ void PopupBlur::apply()
                 m_connections << connect(m_frame, changed, this, slot);
         }
         if (m_frame)
-            qCInfo(lcBlur) << "popup frame found, blur" << m_blur;
+            qCInfo(lcBlur) << "popup frame found, shape" << m_frame->property("mask").value<QRegion>().boundingRect() << "blur" << m_blur;
     }
     if (m_blur) {
         // Plasma's blur is the default: only restore it after we removed it.
         if (!m_restore)
             return;
-        m_restore = false;
-        qCInfo(lcBlur) << "blur restored";
+        // Without the popup's shape yet, blur the whole window for now and
+        // apply the real shape as soon as the frame has one.
         const QRegion shape = m_frame ? m_frame->property("mask").value<QRegion>() : QRegion();
+        if (!shape.isEmpty())
+            m_restore = false;
+        qCInfo(lcBlur) << "blur restored, shape" << shape.boundingRect();
         KWindowEffects::enableBlurBehind(m_window, true, shape);
     } else {
         KWindowEffects::enableBlurBehind(m_window, false);
