@@ -1442,8 +1442,10 @@ static void tab_apply_transparency(tab_t *tab) {
   if (g_transparent) {
     WebKitUserStyleSheet *css = webkit_user_style_sheet_new(
         "html:not([data-chatai-probe]),html:not([data-chatai-probe])>body,"
-        "[data-chatai-clear],[data-chatai-clear-before]::before,[data-chatai-clear-after]::after"
-        "{background-color:transparent!important}",
+        "[data-chatai-clear],[data-chatai-clear-before]::before,[data-chatai-clear-after]::after,"
+        "[data-chatai-clear-i]:not(:hover):not(:active):not(:focus-visible)"
+        "{background-color:transparent!important}"
+        "[data-chatai-clear-img]{background-image:none!important}",
         WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER, NULL, NULL);
     webkit_user_content_manager_add_style_sheet(ucm, css);
     webkit_user_style_sheet_unref(css);

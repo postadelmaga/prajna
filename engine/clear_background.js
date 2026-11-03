@@ -5,9 +5,13 @@
  * of it (composer, messages, menus, dialogs) as the site drew it.
  *
  * Rule: the page's base colour is the opaque background of <body> or <html>.
- * Large containers (>= 8% of the viewport) painted with that same colour are
- * the "page background" and are cleared; anything with another colour is a
- * surface and stays.
+ * An element painted with that same colour while sitting directly on the page
+ * background is invisible in the site's own design, so clearing it changes
+ * nothing but the backdrop: containers, sticky bars, "Share"-style buttons,
+ * fades (gradients from transparent to the base colour). Anything with another
+ * colour is a surface (composer, message bubbles, menus): it and everything
+ * inside it stay as the site drew them, and the walk does not descend there.
+ * Buttons and links keep their hover/pressed colours.
  *
  * No flashes: <html>/<body> are cleared by the engine's user style sheet from
  * the first frame; new containers are cleared in the MutationObserver
@@ -18,6 +22,9 @@
  *   html:not([data-chatai-probe]), html:not([data-chatai-probe]) > body,
  *   [data-chatai-clear], [data-chatai-clear-before]::before,
  *   [data-chatai-clear-after]::after { background-color: transparent !important }
+ *   [data-chatai-clear-i]:not(:hover):not(:active):not(:focus-visible)
+ *     { background-color: transparent !important }
+ *   [data-chatai-clear-img] { background-image: none !important }
  * data-chatai-probe briefly lifts the html/body rule to read their real
  * colour; cleared elements remember theirs in data-chatai-clear. */
 (() => {
@@ -28,16 +35,37 @@
   const ATTR = 'data-chatai-clear';
   /* pseudo-elements (e.g. a full-page ::before splash) get their own marks */
   const PSEUDO = [['::before', 'data-chatai-clear-before'], ['::after', 'data-chatai-clear-after']];
-  const ALL = '[' + ATTR + '],[data-chatai-clear-before],[data-chatai-clear-after]';
+  const ATTR_I = 'data-chatai-clear-i';     /* interactive: keeps hover colour */
+  const ATTR_IMG = 'data-chatai-clear-img';  /* base-coloured fade */
+  const MARKS = [ATTR, ATTR_I, ATTR_IMG, 'data-chatai-clear-before', 'data-chatai-clear-after'];
+  const ALL = MARKS.map(a => '[' + a + ']').join(',');
   const unmark = (e) => {
-    e.removeAttribute(ATTR);
-    for (const [, a] of PSEUDO)
+    for (const a of MARKS)
       e.removeAttribute(a);
   };
+  const cleared = (e) => e.hasAttribute(ATTR) || e.hasAttribute(ATTR_I);
   const PROBE = 'data-chatai-probe';
-  const SKIP = new Set(['SPAN', 'A', 'B', 'I', 'EM', 'STRONG', 'CODE', 'BR', 'IMG', 'SVG', 'PATH',
-    'SCRIPT', 'STYLE', 'LINK', 'META', 'INPUT', 'TEXTAREA', 'BUTTON', 'LABEL', 'P', 'LI', 'TD', 'TH']);
+  /* never painted page background */
+  const IGNORE = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'BR', 'IMG', 'SVG', 'PATH', 'VIDEO',
+    'CANVAS', 'IFRAME', 'TEMPLATE', 'NOSCRIPT', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION']);
+  /* checked themselves, not descended into (text runs, buttons) */
+  const LEAF = new Set(['SPAN', 'A', 'B', 'I', 'EM', 'STRONG', 'CODE', 'PRE', 'P', 'LI', 'TD', 'TH',
+    'LABEL', 'BUTTON', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE']);
+  const CONTAINERS = new Set(['DIV', 'MAIN', 'SECTION', 'ARTICLE', 'ASIDE', 'NAV', 'HEADER', 'FOOTER', 'DIALOG', 'FORM']);
   let on = false, base = null, timer = 0, obs = null, rootObs = null;
+  /* Reading the base colour toggles an attribute on <html>, which restyles
+   * the whole document: only do it when html/body or the style sheets may
+   * have changed. */
+  let baseDirty = true;
+  /* Marks are collected while reading styles and written afterwards in one
+   * go: interleaving would force a style recalculation per element. */
+  let pending = [];
+  const pend = (e, a) => pending.push(e, a);
+  function flush() {
+    for (let i = 0; i < pending.length; i += 2)
+      pending[i].setAttribute(pending[i + 1], '');
+    pending = [];
+  }
   let raf = 0, until = 0;
 
   /* Any CSS colour (rgb, color(srgb ...), oklch, ...) -> [r, g, b, a] with
@@ -70,8 +98,23 @@
     cache.set(c, v);
     return v;
   };
-  const near = (a, b) => a && b && a[3] > 0.85 &&
+  const sameRgb = (a, b) => a && b &&
     Math.abs(a[0] - b[0]) <= 8 && Math.abs(a[1] - b[1]) <= 8 && Math.abs(a[2] - b[2]) <= 8;
+  const near = (a, b) => a && a[3] > 0.85 && sameRgb(a, b);
+
+  /* a gradient made only of the base colour (any alpha) and transparency */
+  const COLOR_TOKEN = /(?:rgba?|hsla?|color|oklch|oklab|lab|lch)\([^)]*\)|#[0-9a-f]{3,8}\b|transparent/gi;
+  function baseFade(img) {
+    if (!img || img === 'none' || !img.includes('gradient(') || img.includes('url('))
+      return false;
+    const stops = img.match(COLOR_TOKEN);
+    if (!stops)
+      return false;
+    return stops.every(t => {
+      const c = rgba(t);
+      return !c || c[3] < 0.05 || sameRgb(c, base);
+    });
+  }
 
   /* real colour of <body>/<html>, with the engine rule lifted for the read */
   function readBase() {
@@ -91,71 +134,84 @@
     return found;
   }
 
-  let minArea = 0;
-  /* Clear `e` if it is a large base-coloured container, then descend into
-   * its large children (small subtrees can't hold page background). */
-  function visit(e, depth) {
-    if (e.nodeType !== 1 || SKIP.has(e.tagName.toUpperCase()))
-      return;
-    const cs = getComputedStyle(e);
-    if (cs.display === 'none')
-      return;
-    if (cs.display !== 'contents') {
-      const r = e.getBoundingClientRect();
-      if (r.width * r.height < minArea)
-        return;
-      if (!e.hasAttribute(ATTR) && near(rgba(cs.backgroundColor), base))
-        e.setAttribute(ATTR, '');
+  const isLarge = (e) => {
+    const r = e.getBoundingClientRect();
+    return r.width * r.height >= innerWidth * innerHeight * 0.08;
+  };
+
+  function mark(e) {
+    const t = e.tagName;
+    pend(e, t === 'BUTTON' || t === 'A' || e.getAttribute('role') === 'button' ? ATTR_I : ATTR);
+  }
+
+  /* Clears `e` if it is base-coloured on the page background. Returns
+   * whether its children still sit on the page background. */
+  function check(e, cs) {
+    if (cleared(e))
+      return true;
+    const c = rgba(cs.backgroundColor);
+    if (near(c, base))
+      mark(e);
+    else if (c && c[3] > 0.1)
+      return false; /* a surface */
+    if (!e.hasAttribute(ATTR_IMG) && baseFade(cs.backgroundImage))
+      pend(e, ATTR_IMG);
+    /* pseudo-element styles aren't cached by the engine: only look at
+     * large containers (full-page splashes are what this is for) */
+    if (CONTAINERS.has(e.tagName) && isLarge(e))
       for (const [ps, a] of PSEUDO) {
         if (e.hasAttribute(a))
           continue;
         const pcs = getComputedStyle(e, ps);
         if (pcs.content !== 'none' && near(rgba(pcs.backgroundColor), base))
-          e.setAttribute(a, '');
+          pend(e, a);
       }
-    }
-    if (depth < 30)
-      for (const c of e.children)
-        visit(c, depth + 1);
+    return true;
   }
 
-  /* Cheap check for freshly added nodes (e.g. every streamed token): colour
-   * first, so layout is only queried for base-coloured candidates; bounded
-   * depth. Returns true if a container that might hold page background was
-   * added, so the next frames get full scans. */
-  const CONTAINERS = new Set(['DIV', 'MAIN', 'SECTION', 'ARTICLE', 'ASIDE', 'NAV', 'HEADER', 'FOOTER', 'DIALOG']);
-  function visitAdded(e, depth) {
-    if (e.nodeType !== 1 || SKIP.has(e.tagName.toUpperCase()))
-      return false;
+  function visit(e, depth) {
+    if (e.nodeType !== 1 || IGNORE.has(e.tagName))
+      return;
     const cs = getComputedStyle(e);
     if (cs.display === 'none')
-      return false;
-    const container = CONTAINERS.has(e.tagName.toUpperCase());
-    let hit = near(rgba(cs.backgroundColor), base);
-    if (container)
-      for (const [ps, a] of PSEUDO) {
-        const pcs = getComputedStyle(e, ps);
-        if (pcs.content !== 'none' && near(rgba(pcs.backgroundColor), base))
-          hit = true;
-      }
-    if (hit)
-      visit(e, 0); /* size check + marks */
-    let big = container && e.childElementCount > 2;
-    if (depth < 6)
-      for (const c of e.children)
-        big = visitAdded(c, depth + 1) || big;
-    return big;
+      return;
+    if (cs.display !== 'contents' && !check(e, cs))
+      return; /* inside a surface: nothing there is page background */
+    if (LEAF.has(e.tagName) || depth > 40)
+      return;
+    for (const c of e.children)
+      visit(c, depth + 1);
+  }
+
+  /* does `e` sit on the page background (no painted ancestor surface)? */
+  function onBase(e) {
+    for (let p = e.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (cleared(p))
+        continue;
+      const c = rgba(getComputedStyle(p).backgroundColor);
+      if (c && c[3] > 0.1)
+        return false;
+    }
+    return true;
   }
 
   function fullScan() {
     if (!on || !document.body)
       return;
-    base = readBase();
+    if (baseDirty || !base) {
+      const b = readBase();
+      baseDirty = false;
+      /* the site switched background (e.g. home -> conversation): restart */
+      if (base && (!b || !sameRgb(base, b)))
+        for (const e of document.querySelectorAll(ALL))
+          unmark(e);
+      base = b;
+    }
     if (!base)
       return;
-    minArea = innerWidth * innerHeight * 0.08;
     for (const c of document.body.children)
       visit(c, 0);
+    flush();
   }
 
   /* One pending catch-all scan at most (only the timer clears `timer`). */
@@ -172,6 +228,7 @@
   function rescan() {
     if (!on)
       return;
+    baseDirty = true;
     for (const e of document.querySelectorAll(ALL))
       unmark(e);
     fullScan();
@@ -200,12 +257,21 @@
       fullScan();
       return;
     }
-    minArea = innerWidth * innerHeight * 0.08;
     let big = false;
     for (const m of list)
-      for (const n of m.addedNodes)
-        if (n.nodeType === 1)
-          big = visitAdded(n, 0) || big;
+      for (const n of m.addedNodes) {
+        if (n.nodeType !== 1 || !n.isConnected)
+          continue;
+        if (n.tagName === 'STYLE' || n.tagName === 'LINK')
+          baseDirty = true;
+        if (onBase(n))
+          visit(n, 0);
+        if (CONTAINERS.has(n.tagName) && n.childElementCount > 2)
+          big = true;
+      }
+    flush();
+    if (baseDirty)
+      later(50);
     /* a new layout may be restyled by classes in the next frames */
     if (big)
       kick(400);
@@ -222,6 +288,8 @@
   }
 
   window.__chataiClear = {
+    /* one full pass (also used by tests and benchmarks) */
+    scan: () => fullScan(),
     start() {
       if (on)
         return;
@@ -234,24 +302,37 @@
       watchRoot();
       /* style sheets arriving change colours without DOM mutations */
       document.addEventListener('load', (ev) => {
-        if (ev.target && ev.target.tagName === 'LINK')
+        if (ev.target && ev.target.tagName === 'LINK') {
+          baseDirty = true;
           fullScan();
+        }
       }, true);
-      document.addEventListener('DOMContentLoaded', fullScan);
+      document.addEventListener('DOMContentLoaded', () => {
+        baseDirty = true;
+        fullScan();
+      });
       addEventListener('load', () => {
+        baseDirty = true;
         fullScan();
         kick(3000); /* hydration usually restyles right after load */
       });
       addEventListener('pageshow', () => kick(1500));
-      addEventListener('resize', () => {
-        later(300);
-      });
+      addEventListener('resize', () => later(300));
+      /* a button seen while hovered had its hover colour: look again */
+      addEventListener('pointerout', (ev) => {
+        const t = ev.target && ev.target.closest && ev.target.closest('button, a, [role=button]');
+        if (t && !cleared(t))
+          later(250);
+      }, {capture: true, passive: true});
       matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rescan);
+      baseDirty = true;
       fullScan();
       kick(1500);
     },
     stop() {
       on = false;
+      pending = [];
+      base = null;
       if (obs)
         obs.disconnect();
       if (rootObs)
