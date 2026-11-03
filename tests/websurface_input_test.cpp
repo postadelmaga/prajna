@@ -193,6 +193,59 @@ private Q_SLOTS:
         QVERIFY(m_web->property("frameResident").toBool());
         QVERIFY2(m_window->grabWindow() == before, "quick hide/show left the view blank");
     }
+
+    // Last: leaves extra tabs behind until it cleans up.
+    void tabs()
+    {
+        auto count = [&] { return m_web->property("tabs").toList().size(); };
+        auto current = [&] { return m_web->property("currentTab").toInt(); };
+        auto title = [&] { return m_web->property("title").toString(); };
+        QCOMPARE(count(), 1);
+        m_web->setProperty("linksInTabs", true);
+
+        // new tab: appended and shown
+        QMetaObject::invokeMethod(m_web, "newTab",
+                                  Q_ARG(QUrl, QUrl(QStringLiteral("data:text/html,<title>Two</title><a id=l target=_blank href='about:blank%23link'>x</a>"))));
+        QTRY_COMPARE_WITH_TIMEOUT(count(), 2, 5000);
+        QCOMPARE(current(), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Two"), 5000);
+
+        // a target=_blank link opens a tab right after its page
+        QCOMPARE(js(QStringLiteral("document.getElementById('l').click(), 'ok'")), QStringLiteral("ok"));
+        QTRY_COMPARE_WITH_TIMEOUT(count(), 3, 5000);
+        QCOMPARE(current(), 2);
+        QTRY_COMPARE_WITH_TIMEOUT(m_web->property("url").toUrl().fragment(), QStringLiteral("link"), 5000);
+        QVERIFY(!m_web->property("tabs").toList().at(2).toMap().value(QStringLiteral("popup")).toBool());
+        // (pages may not open data: URLs at top level: replace it with one)
+        QMetaObject::invokeMethod(m_web, "load", Q_ARG(QUrl, QUrl(QStringLiteral("data:text/html,<title>Three</title>3"))));
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Three"), 5000);
+
+        // switching updates the page state
+        QMetaObject::invokeMethod(m_web, "switchTab", Q_ARG(int, 1));
+        QTRY_COMPARE_WITH_TIMEOUT(current(), 1, 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Two"), 5000);
+        QCOMPARE(m_web->property("tabUrls").toStringList().size(), 3);
+
+        // an engine restart reopens the tabs and the current one
+        QMetaObject::invokeMethod(m_web, "restartEngine");
+        QTRY_VERIFY_WITH_TIMEOUT(!m_web->property("running").toBool(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(m_web->property("running").toBool(), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(count(), 3, 10000);
+        QTRY_COMPARE_WITH_TIMEOUT(current(), 1, 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Two"), 5000);
+
+        // closing the current tab shows its neighbour
+        QMetaObject::invokeMethod(m_web, "closeTab", Q_ARG(int, 1));
+        QTRY_COMPARE_WITH_TIMEOUT(count(), 2, 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Three"), 5000);
+        QCOMPARE(current(), 1);
+        QMetaObject::invokeMethod(m_web, "closeTab", Q_ARG(int, 1));
+        QTRY_COMPARE_WITH_TIMEOUT(count(), 1, 5000);
+        // the last tab cannot be closed
+        QMetaObject::invokeMethod(m_web, "closeTab", Q_ARG(int, 0));
+        QTest::qWait(300);
+        QCOMPARE(count(), 1);
+    }
 };
 
 QTEST_MAIN(WebSurfaceInputTest)

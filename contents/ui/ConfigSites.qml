@@ -22,6 +22,8 @@ KCM.SimpleKCM {
     property string cfg_url
     property string cfg_customSites
     property bool cfg_hideCustomURL
+    property bool cfg_linksInTabs
+    property bool cfg_reopenTabs
 
     property bool cfg_showChatGPT
     property bool cfg_showClaude
@@ -79,6 +81,20 @@ KCM.SimpleKCM {
             valueRole: "url"
             currentIndex: page.startChoices.findIndex(s => s.url === page.cfg_url)
             onActivated: page.cfg_url = currentValue
+        }
+
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Links to new windows:")
+            Layout.minimumWidth: Kirigami.Units.gridUnit * 14
+            model: [i18n("Open in a new tab"), i18n("Open in the web browser")]
+            currentIndex: page.cfg_linksInTabs ? 0 : 1
+            onActivated: index => page.cfg_linksInTabs = index === 0
+        }
+
+        QQC2.CheckBox {
+            text: i18n("Reopen the tabs of the last session")
+            checked: page.cfg_reopenTabs
+            onToggled: page.cfg_reopenTabs = checked
         }
 
         Kirigami.Separator {

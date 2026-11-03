@@ -177,6 +177,18 @@
       <label>See-through page background (the blurred popup shows behind the chat)</label>
       <default>true</default>
     </entry>
+    <entry name="linksInTabs" type="Bool">
+      <label>Links that ask for a new window open in a new tab (false: in the web browser)</label>
+      <default>true</default>
+    </entry>
+    <entry name="reopenTabs" type="Bool">
+      <label>Reopen the tabs of the last session</label>
+      <default>true</default>
+    </entry>
+    <entry name="openTabs" type="StringList">
+      <label>Addresses of the open tabs after the first (saved session)</label>
+      <default></default>
+    </entry>
     <entry name="gpuRendering" type="Bool">
       <label>Draw pages on the integrated GPU (Intel/AMD APU) instead of the CPU</label>
       <default>true</default>

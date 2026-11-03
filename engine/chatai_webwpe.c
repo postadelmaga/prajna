@@ -42,6 +42,7 @@
 typedef struct tab {
   int id;
   int opener_id;
+  int flags; /* ZURF_TAB_* */
   WebKitWebView *view;
   WPEView *wview;
 } tab_t;
@@ -87,6 +88,7 @@ static GPtrArray *g_downloads;
 static int g_next_dl_id = 1;
 static char *g_download_dir;
 static int g_popups_as_tabs = 1;
+static int g_links_as_tabs = 0; /* target=_blank / middle-click → new tab */
 
 static double g_ptr_x, g_ptr_y;
 static int g_ptr_inside;
@@ -619,15 +621,15 @@ static void tab_activate(tab_t *tab) {
   g_force_full = 1;
   if (tab) {
     tab_set_visible(tab, g_visible);
+    int32_t v[3] = {tab->id, tab->opener_id, tab->flags};
+    send_event(ZURF_EV_TAB, v, sizeof(v)); /* "this tab is now active" */
     send_tab_str(ZURF_EV_TITLE, tab->id, webkit_web_view_get_title(tab->view));
     send_tab_str(ZURF_EV_URL, tab->id, webkit_web_view_get_uri(tab->view));
     send_load_state(tab);
-    int32_t id = tab->id;
-    send_event(ZURF_EV_TAB, &id, 4); /* "this tab is now active" */
   }
 }
 
-static tab_t *tab_register(WebKitWebView *view, int opener_id);
+static tab_t *tab_register(WebKitWebView *view, int opener_id, int flags);
 static void tab_apply_transparency(tab_t *tab);
 static int g_transparent; /* see tab_apply_transparency */
 
@@ -784,26 +786,25 @@ static int is_web_scheme(const char *uri) {
                  g_str_has_prefix(uri, "javascript:"));
 }
 
-/* window.open / target=_blank. Plain link clicks go to the system browser;
- * script-opened windows (OAuth popups need window.opener) become a related
- * tab the host shows on top, closed again by the page's window.close(). */
+/* window.open / target=_blank / middle-click. Script-opened windows (OAuth
+ * popups need window.opener) become a related tab, closed again by the
+ * page's window.close(); links go to a new tab or the system browser,
+ * depending on new-window-policy. */
 static WebKitWebView *on_create(WebKitWebView *v, WebKitNavigationAction *nav, gpointer d) {
   tab_t *opener = d;
   WebKitURIRequest *rq = webkit_navigation_action_get_request(nav);
   const char *uri = rq ? webkit_uri_request_get_uri(rq) : NULL;
   WebKitNavigationType type = webkit_navigation_action_get_navigation_type(nav);
 
-  int as_popup = g_popups_as_tabs && type != WEBKIT_NAVIGATION_TYPE_LINK_CLICKED;
-  if (!as_popup) {
+  const int is_link = type == WEBKIT_NAVIGATION_TYPE_LINK_CLICKED;
+  if (!(is_link ? g_links_as_tabs : g_popups_as_tabs)) {
     if (uri && uri[0] && strcmp(uri, "about:blank") != 0)
       send_str(ZURF_EV_OPEN_EXTERNAL, uri);
     return NULL;
   }
-  WebKitWebView *nv = g_object_new(WEBKIT_TYPE_WEB_VIEW,
-                                   "related-view", v,
-                                   "display", g_display,
-                                   NULL);
-  tab_t *tab = tab_register(nv, opener ? opener->id : 0);
+  /* the related view brings its display, context and session */
+  WebKitWebView *nv = g_object_new(WEBKIT_TYPE_WEB_VIEW, "related-view", v, NULL);
+  tab_t *tab = tab_register(nv, opener ? opener->id : 0, is_link ? 0 : ZURF_TAB_POPUP);
   if (!tab) {
     g_object_unref(nv);
     return NULL;
@@ -895,7 +896,7 @@ static void on_failed_to_find(WebKitFindController *fc, gpointer d) {
   send_event(ZURF_EV_FIND_RESULT, &c, 4);
 }
 
-static tab_t *tab_register(WebKitWebView *view, int opener_id) {
+static tab_t *tab_register(WebKitWebView *view, int opener_id, int flags) {
   int slot = -1;
   for (int i = 0; i < MAX_TABS; i++) {
     if (!g_tabs[i]) {
@@ -908,6 +909,7 @@ static tab_t *tab_register(WebKitWebView *view, int opener_id) {
   tab_t *tab = g_new0(tab_t, 1);
   tab->id = g_next_tab_id++;
   tab->opener_id = opener_id;
+  tab->flags = flags;
   tab->view = view;
   tab->wview = webkit_web_view_get_wpe_view(view);
   /* The view owns `tab`: freed when the view finalizes, so late callbacks
@@ -950,7 +952,7 @@ static tab_t *tab_new(const char *url) {
                                      "network-session", g_session,
                                      "settings", g_settings,
                                      NULL);
-  tab_t *tab = tab_register(view, 0);
+  tab_t *tab = tab_register(view, 0, 0);
   if (!tab) {
     g_object_unref(view);
     return NULL;
@@ -1487,6 +1489,7 @@ static void apply_pref(const char *k, const char *v) {
       g_frame_interval_us = 1000000 / fps;
   } else if (strcmp(k, "new-window-policy") == 0) {
     g_popups_as_tabs = strcmp(v, "external") != 0;
+    g_links_as_tabs = strcmp(v, "tabs") == 0;
   } else if (strcmp(k, "transparent") == 0) {
     if (g_transparent != truthy(v)) {
       g_transparent = truthy(v);

@@ -210,6 +210,7 @@ PlasmoidItem {
             onNavigateBackRequested: webviewRoot.goBack()
             onNavigateForwardRequested: webviewRoot.goForward()
             onPrintPageRequested: webviewRoot.printPage()
+            onNewTabRequested: webviewRoot.newTab()
             onToggleSearchRequested: {
                 if (webviewRoot && webviewRoot.findBarVisible !== undefined) {
                     webviewRoot.findBarVisible = !webviewRoot.findBarVisible;

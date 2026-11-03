@@ -28,6 +28,7 @@ PlasmaExtras.Menu {
     readonly property bool hasMedia: mediaUrl !== "" && !mediaUrl.startsWith("data:") && !mediaUrl.startsWith("blob:")
 
     signal reloadRequested()
+    signal newTabRequested(string url)
 
     visualParent: webviewItem
 
@@ -62,6 +63,13 @@ PlasmaExtras.Menu {
     PlasmaExtras.MenuItem {
         separator: true
         visible: contextMenu.editable || contextMenu.hasSelection
+    }
+
+    PlasmaExtras.MenuItem {
+        text: i18n("Open Link in New Tab")
+        icon: "tab-new"
+        visible: contextMenu.hasLink
+        onClicked: contextMenu.newTabRequested(contextMenu.link)
     }
 
     PlasmaExtras.MenuItem {

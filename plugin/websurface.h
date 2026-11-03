@@ -13,6 +13,7 @@
 #include <QPointer>
 #include <QQuickItem>
 #include <QUrl>
+#include <QVariantList>
 #include <atomic>
 #include <QtQml/qqmlregistration.h>
 
@@ -58,7 +59,19 @@ class WebSurface : public QQuickItem
     Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY loadStateChanged)
     Q_PROPERTY(bool canGoForward READ canGoForward NOTIFY loadStateChanged)
     Q_PROPERTY(QString hoveredLink READ hoveredLink NOTIFY hoveredLinkChanged)
+    // The current tab is a window opened by a script (sign-in popup).
     Q_PROPERTY(bool popupOpen READ isPopupOpen NOTIFY popupOpenChanged)
+    // Open tabs in display order: [{id, title, url, popup}], and the index
+    // of the current one. Page state above (url, title, loading...) is the
+    // current tab's.
+    Q_PROPERTY(QVariantList tabs READ tabs NOTIFY tabsChanged)
+    Q_PROPERTY(int currentTab READ currentTab NOTIFY tabsChanged)
+    // Addresses of the open tabs, sign-in popups excluded (to save a session).
+    Q_PROPERTY(QStringList tabUrls READ tabUrls NOTIFY tabsChanged)
+    // Extra tabs to open, after `url`, the first time the engine starts (a
+    // saved session). Later restarts (idle unload, crash, settings) restore
+    // the tabs that were open at that moment instead.
+    Q_PROPERTY(QStringList restoreTabs READ restoreTabs WRITE setRestoreTabs NOTIFY restoreTabsChanged)
     // Diagnostic: a frame copy is held in this process (false while the view
     // is hidden: the copy is released, the engine keeps the frame).
     Q_PROPERTY(bool frameResident READ isFrameResident)
@@ -72,6 +85,9 @@ class WebSurface : public QQuickItem
     Q_PROPERTY(bool playbackRequiresUserGesture READ playbackRequiresUserGesture WRITE setPlaybackRequiresUserGesture NOTIFY prefsChanged)
     Q_PROPERTY(bool spatialNavigation READ spatialNavigation WRITE setSpatialNavigation NOTIFY prefsChanged)
     Q_PROPERTY(bool popupsInPlace READ popupsInPlace WRITE setPopupsInPlace NOTIFY prefsChanged)
+    // Links that ask for a new window (target=_blank, middle click) open in
+    // a new tab instead of the system browser.
+    Q_PROPERTY(bool linksInTabs READ linksInTabs WRITE setLinksInTabs NOTIFY prefsChanged)
     // See-through page background: the site's own background containers are
     // cleared, so whatever is behind the item (the blurred popup) shows.
     Q_PROPERTY(bool transparentBackground READ transparentBackground WRITE setTransparentBackground NOTIFY prefsChanged)
@@ -138,7 +154,12 @@ public:
     bool canGoBack() const { return m_canGoBack; }
     bool canGoForward() const { return m_canGoForward; }
     QString hoveredLink() const { return m_hoveredLink; }
-    bool isPopupOpen() const { return m_tabs.size() > 1; }
+    bool isPopupOpen() const;
+    QVariantList tabs() const;
+    int currentTab() const { return indexOfTab(m_activeTab); }
+    QStringList tabUrls() const;
+    QStringList restoreTabs() const { return m_restoreTabs; }
+    void setRestoreTabs(const QStringList &urls);
     bool isFrameResident() const { return m_frameResident.load(); }
 
     QString userAgent() const { return m_userAgent; }
@@ -159,6 +180,8 @@ public:
     bool transparentBackground() const { return m_transparent; }
     void setTransparentBackground(bool on);
     void setPopupsInPlace(bool on);
+    bool linksInTabs() const { return m_linksInTabs; }
+    void setLinksInTabs(bool on);
     int maxFps() const { return m_maxFps; }
     void setMaxFps(int fps);
 
@@ -174,6 +197,10 @@ public:
     Q_INVOKABLE void editCommand(const QString &command); // Copy, Cut, Paste, SelectAll, Undo, Redo
     Q_INVOKABLE void insertText(const QString &text);
     Q_INVOKABLE void closePopup();
+    Q_INVOKABLE void newTab(const QUrl &url);
+    Q_INVOKABLE void closeTab(int index);
+    Q_INVOKABLE void switchTab(int index);
+    Q_INVOKABLE void cycleTab(int delta); // +1 next, -1 previous, wrapping
     Q_INVOKABLE void replyFileChooser(int requestId, const QList<QUrl> &files);
     Q_INVOKABLE void replyPermission(int requestId, bool allow);
     Q_INVOKABLE void cancelDownload(int downloadId);
@@ -195,6 +222,8 @@ Q_SIGNALS:
     void loadStateChanged();
     void hoveredLinkChanged();
     void popupOpenChanged();
+    void tabsChanged();
+    void restoreTabsChanged();
     void prefsChanged();
 
     void fileChooserRequested(int requestId, bool multiple, const QStringList &mimeTypes);
@@ -293,8 +322,24 @@ private:
     bool m_canGoBack = false;
     bool m_canGoForward = false;
     QString m_hoveredLink;
-    QList<int> m_tabs;
+    struct Tab {
+        int id = 0;
+        int opener = 0;
+        bool popup = false;
+        QString title;
+        QUrl url;
+    };
+    int indexOfTab(int id) const;
+    bool isHostShortcut(QKeyEvent *ke) const;
+    void restoreSession();
+    QList<Tab> m_tabs; // display order
     int m_activeTab = 0;
+    // tabs to reopen once the engine is up, and which one to show
+    QStringList m_session;
+    int m_sessionCurrent = 0;
+    int m_sessionExpected = 0; // tab count once restored (0 = not restoring)
+    QStringList m_restoreTabs;
+    bool m_restoreUsed = false;
 
     QString m_userAgent;
     QString m_downloadDir;
@@ -304,6 +349,7 @@ private:
     bool m_mediaGesture = false;
     bool m_spatialNav = false;
     bool m_popupsInPlace = true;
+    bool m_linksInTabs = false;
     bool m_transparent = false;
     int m_maxFps = 30;
 

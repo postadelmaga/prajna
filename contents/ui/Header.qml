@@ -26,6 +26,7 @@ RowLayout {
     signal navigateForwardRequested
     signal printPageRequested
     signal toggleSearchRequested
+    signal newTabRequested
 
     // Properties for managing component state
     property var closeWebViewCallback: undefined    // Callback function for closing webview
@@ -117,12 +118,16 @@ RowLayout {
         id: moreButton
         icon.name: "overflow-menu"
         tip: i18n("More actions")
-        visible: homeItem.visible || reloadItem.visible || autoHideItem.visible || !plasmoid.configuration.hideDownloadButton
         onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
 
         PlasmaComponents3.Menu {
             id: moreMenu
 
+            PlasmaComponents3.MenuItem {
+                icon.name: "tab-new"
+                text: i18n("New Tab")
+                onTriggered: newTabRequested()
+            }
             PlasmaComponents3.MenuItem {
                 id: homeItem
                 icon.name: "go-home"
@@ -204,7 +209,19 @@ RowLayout {
         if (!plasmoid.configuration.hideCustomURL)
             list.push({ "text": i18n("Custom URL…"), "url": "" });
         urlComboBox.model = list;
-        urlComboBox.currentIndex = list.findIndex(m => m.url === current);
+        // Show the site of the current tab when it is one of the list.
+        const host = u => (u || "").toString().replace(/^[a-z]+:\/\//i, "").split(/[/?#]/)[0].replace(/^www\./, "");
+        const tabHost = webview ? host(webview.url) : "";
+        const byTab = tabHost ? list.findIndex(m => m.url && host(m.url) === tabHost) : -1;
+        urlComboBox.currentIndex = byTab >= 0 ? byTab : list.findIndex(m => m.url === current);
+    }
+
+    Connections {
+        target: webview
+        ignoreUnknownSignals: true
+        function onUrlChanged() {
+            modelUpdateTimer.restart();
+        }
     }
 
     Binding {

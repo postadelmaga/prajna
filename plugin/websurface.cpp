@@ -310,6 +310,7 @@ WS_PREF_SETTER(setJavascriptCanAccessClipboard, m_jsClipboard, bool)
 WS_PREF_SETTER(setPlaybackRequiresUserGesture, m_mediaGesture, bool)
 WS_PREF_SETTER(setSpatialNavigation, m_spatialNav, bool)
 WS_PREF_SETTER(setPopupsInPlace, m_popupsInPlace, bool)
+WS_PREF_SETTER(setLinksInTabs, m_linksInTabs, bool)
 WS_PREF_SETTER(setTransparentBackground, m_transparent, bool)
 
 void WebSurface::setMaxFps(int fps)
@@ -426,8 +427,101 @@ void WebSurface::insertText(const QString &text)
 
 void WebSurface::closePopup()
 {
-    if (m_tabs.size() > 1)
-        sendInts(ZURF_OP_TAB_CLOSE, {m_activeTab});
+    if (isPopupOpen())
+        closeTab(currentTab());
+}
+
+// ---------------------------------------------------------------------------
+// tabs
+
+int WebSurface::indexOfTab(int id) const
+{
+    for (int i = 0; i < m_tabs.size(); ++i)
+        if (m_tabs[i].id == id)
+            return i;
+    return -1;
+}
+
+bool WebSurface::isPopupOpen() const
+{
+    const int i = currentTab();
+    return i >= 0 && m_tabs[i].popup;
+}
+
+QVariantList WebSurface::tabs() const
+{
+    QVariantList list;
+    list.reserve(m_tabs.size());
+    for (const Tab &t : m_tabs)
+        list << QVariantMap{{QStringLiteral("id"), t.id},
+                            {QStringLiteral("title"), t.title},
+                            {QStringLiteral("url"), t.url},
+                            {QStringLiteral("popup"), t.popup}};
+    return list;
+}
+
+QStringList WebSurface::tabUrls() const
+{
+    QStringList urls;
+    for (const Tab &t : m_tabs)
+        if (!t.popup && t.url.isValid() && !t.url.isEmpty() && t.url.scheme() != QLatin1String("about"))
+            urls << QString::fromUtf8(t.url.toEncoded());
+    return urls;
+}
+
+void WebSurface::setRestoreTabs(const QStringList &urls)
+{
+    if (m_restoreTabs == urls)
+        return;
+    m_restoreTabs = urls;
+    Q_EMIT restoreTabsChanged();
+}
+
+void WebSurface::newTab(const QUrl &url)
+{
+    if (m_ready)
+        send(ZURF_OP_TAB_NEW, (url.isValid() ? url : m_url).toEncoded());
+}
+
+void WebSurface::switchTab(int index)
+{
+    if (index >= 0 && index < m_tabs.size() && m_tabs[index].id != m_activeTab)
+        sendInts(ZURF_OP_TAB_SWITCH, {m_tabs[index].id});
+}
+
+void WebSurface::cycleTab(int delta)
+{
+    const int n = m_tabs.size();
+    if (n > 1)
+        switchTab(((currentTab() + delta) % n + n) % n);
+}
+
+void WebSurface::closeTab(int index)
+{
+    if (index < 0 || index >= m_tabs.size() || m_tabs.size() < 2)
+        return;
+    const Tab &t = m_tabs[index];
+    if (t.id == m_activeTab) {
+        // Show the opener of a popup, else the neighbour (like a browser),
+        // before the engine picks one itself.
+        int next = indexOfTab(t.opener);
+        if (next < 0)
+            next = index + 1 < m_tabs.size() ? index + 1 : index - 1;
+        sendInts(ZURF_OP_TAB_SWITCH, {m_tabs[next].id});
+    }
+    sendInts(ZURF_OP_TAB_CLOSE, {t.id});
+}
+
+// Reopen the tabs of the previous engine run (see restoreTabs).
+void WebSurface::restoreSession()
+{
+    const QStringList extra = m_session.mid(1);
+    m_session.clear();
+    if (extra.isEmpty())
+        return;
+    m_sessionExpected = extra.size() + 1;
+    for (const QString &u : extra)
+        send(ZURF_OP_TAB_NEW, u.toUtf8());
 }
 
 void WebSurface::replyFileChooser(int requestId, const QList<QUrl> &files)
@@ -564,7 +658,15 @@ void WebSurface::startEngine()
         QStringLiteral("--zurf-frame-events"),
         QStringLiteral("--max-fps=%1").arg(m_maxFps),
     };
-    if (m_url.isValid())
+    if (m_session.isEmpty() && !m_restoreUsed && !m_restoreTabs.isEmpty()) {
+        m_session = QStringList{QString::fromUtf8(m_url.toEncoded())} + m_restoreTabs;
+        m_sessionCurrent = 0;
+    }
+    m_restoreUsed = true;
+    m_sessionExpected = 0;
+    if (!m_session.isEmpty())
+        args << QStringLiteral("--zurf-url=%1").arg(m_session.first());
+    else if (m_url.isValid())
         args << QStringLiteral("--zurf-url=%1").arg(QString::fromUtf8(m_url.toEncoded()));
     if (m_memoryLimitMb > 0)
         args << QStringLiteral("--memory-limit-mb=%1").arg(m_memoryLimitMb);
@@ -663,10 +765,28 @@ void WebSurface::stopEngine(bool graceful)
     for (QJSValue cb : callbacks)
         cb.call({QJSValue(QString())});
 
-    const bool hadPopup = m_tabs.size() > 1;
+    // Remember the open tabs: the next start reopens them.
+    if (m_tabs.size() > 1) {
+        m_session.clear();
+        m_sessionCurrent = 0;
+        for (const Tab &t : std::as_const(m_tabs)) {
+            if (t.popup || !t.url.isValid() || t.url.isEmpty() || t.url.scheme() == QLatin1String("about"))
+                continue;
+            if (t.id == m_activeTab)
+                m_sessionCurrent = m_session.size();
+            m_session << QString::fromUtf8(t.url.toEncoded());
+        }
+        if (m_session.size() < 2)
+            m_session.clear();
+    }
+    const bool hadPopup = isPopupOpen();
+    const bool hadTabs = !m_tabs.isEmpty();
     m_tabs.clear();
+    m_activeTab = 0;
     if (hadPopup)
         Q_EMIT popupOpenChanged();
+    if (hadTabs)
+        Q_EMIT tabsChanged();
     if (m_loading) {
         m_loading = false;
         Q_EMIT loadStateChanged();
@@ -797,6 +917,7 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
         sendInts(ZURF_OP_FOCUS, {hasActiveFocus() ? 1 : 0});
         if (hasActiveFocus())
             pushClipboard();
+        restoreSession();
         Q_EMIT runningChanged();
         break;
     case ZURF_EV_FRAME:
@@ -807,38 +928,74 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
         m_frameDirty = true;
         update();
         break;
-    case ZURF_EV_TITLE:
-        if (readI32(p, 0) == m_activeTab) {
-            const QString t = QString::fromUtf8(p.mid(4));
-            if (t != m_title) {
-                m_title = t;
-                Q_EMIT titleChanged();
-            }
+    case ZURF_EV_TITLE: {
+        const int id = readI32(p, 0);
+        const QString t = QString::fromUtf8(p.mid(4));
+        const int i = indexOfTab(id);
+        if (i >= 0 && m_tabs[i].title != t) {
+            m_tabs[i].title = t;
+            Q_EMIT tabsChanged();
+        }
+        if (id == m_activeTab && t != m_title) {
+            m_title = t;
+            Q_EMIT titleChanged();
         }
         break;
-    case ZURF_EV_URL:
-        if (readI32(p, 0) == m_activeTab && m_tabs.size() <= 1) {
-            const QUrl u = QUrl::fromEncoded(p.mid(4));
-            if (u.isValid() && u != m_url && !u.isEmpty()) {
-                m_url = u;
-                Q_EMIT urlChanged();
-            }
+    }
+    case ZURF_EV_URL: {
+        const int id = readI32(p, 0);
+        const QUrl u = QUrl::fromEncoded(p.mid(4));
+        if (!u.isValid() || u.isEmpty())
+            break;
+        const int i = indexOfTab(id);
+        if (i >= 0 && m_tabs[i].url != u) {
+            m_tabs[i].url = u;
+            Q_EMIT tabsChanged();
+        }
+        if (id == m_activeTab && u != m_url) {
+            m_url = u;
+            Q_EMIT urlChanged();
         }
         break;
+    }
     case ZURF_EV_TAB: {
         const int id = readI32(p, 0);
-        const bool hadPopup = m_tabs.size() > 1;
-        if (!m_tabs.contains(id))
-            m_tabs.append(id);
+        const bool hadPopup = isPopupOpen();
+        if (indexOfTab(id) < 0) {
+            Tab t;
+            t.id = id;
+            t.opener = p.size() >= 8 ? readI32(p, 1) : 0;
+            t.popup = p.size() >= 12 && (readI32(p, 2) & ZURF_TAB_POPUP);
+            // Opened from a page: right after it (and its other children).
+            int at = m_tabs.size();
+            const int opener = indexOfTab(t.opener);
+            if (opener >= 0) {
+                at = opener + 1;
+                while (at < m_tabs.size() && m_tabs[at].opener == t.opener)
+                    ++at;
+            }
+            m_tabs.insert(at, t);
+        }
         m_activeTab = id;
-        if (hadPopup != (m_tabs.size() > 1))
+        // Restored session complete: show the tab that was current.
+        if (m_sessionExpected && m_tabs.size() >= m_sessionExpected) {
+            m_sessionExpected = 0;
+            if (m_sessionCurrent > 0 && m_sessionCurrent < m_tabs.size())
+                sendInts(ZURF_OP_TAB_SWITCH, {m_tabs[m_sessionCurrent].id});
+        }
+        if (hadPopup != isPopupOpen())
             Q_EMIT popupOpenChanged();
+        Q_EMIT tabsChanged();
         break;
     }
     case ZURF_EV_TAB_CLOSED: {
-        const bool hadPopup = m_tabs.size() > 1;
-        m_tabs.removeAll(readI32(p, 0));
-        if (hadPopup != (m_tabs.size() > 1))
+        const bool hadPopup = isPopupOpen();
+        const int i = indexOfTab(readI32(p, 0));
+        if (i >= 0) {
+            m_tabs.removeAt(i);
+            Q_EMIT tabsChanged();
+        }
+        if (hadPopup != isPopupOpen())
             Q_EMIT popupOpenChanged();
         break;
     }
@@ -964,7 +1121,7 @@ void WebSurface::sendPrefs()
     prefs += QByteArray("js-clipboard=") + b(m_jsClipboard) + '\n';
     prefs += QByteArray("media-gesture=") + b(m_mediaGesture) + '\n';
     prefs += QByteArray("spatial-nav=") + b(m_spatialNav) + '\n';
-    prefs += QByteArray("new-window-policy=") + (m_popupsInPlace ? "popup" : "external") + '\n';
+    prefs += QByteArray("new-window-policy=") + (!m_popupsInPlace ? "external" : m_linksInTabs ? "tabs" : "popup") + '\n';
     prefs += QByteArray("transparent=") + (m_transparent ? "1" : "0") + '\n';
     prefs += "max-fps=" + QByteArray::number(m_maxFps) + '\n';
     send(ZURF_OP_SET_PREFS, prefs);
@@ -1224,13 +1381,26 @@ static int protoButton(Qt::MouseButton b)
     }
 }
 
+// Keys the host handles itself even while the page has focus: find and the
+// tab shortcuts (switching/closing only when there are tabs).
+bool WebSurface::isHostShortcut(QKeyEvent *ke) const
+{
+    if (ke->matches(QKeySequence::Find) || ke->matches(QKeySequence::AddTab))
+        return true;
+    if (m_tabs.size() < 2)
+        return false;
+    const bool ctrl = ke->modifiers() & Qt::ControlModifier;
+    return ke->matches(QKeySequence::Close) || ke->matches(QKeySequence::NextChild) || ke->matches(QKeySequence::PreviousChild)
+        || (ctrl && (ke->key() == Qt::Key_PageUp || ke->key() == Qt::Key_PageDown || ke->key() == Qt::Key_Backtab));
+}
+
 bool WebSurface::event(QEvent *e)
 {
     if (e->type() == QEvent::ShortcutOverride) {
         // The page gets every key while focused (Ctrl+C, Ctrl+A, Esc, ...),
         // except the host's own find shortcut.
         auto *ke = static_cast<QKeyEvent *>(e);
-        if (!ke->matches(QKeySequence::Find)) {
+        if (!isHostShortcut(ke)) {
             e->accept();
             return true;
         }

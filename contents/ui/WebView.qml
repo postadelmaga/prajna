@@ -50,6 +50,12 @@ Item {
         webview.goBack();
     }
 
+    // A new tab with the start page (or `url`).
+    function newTab(url) {
+        webview.newTab(url || plasmoid.configuration.url);
+        webview.forceActiveFocus();
+    }
+
     function goForward() {
         webview.goForward();
     }
@@ -165,10 +171,32 @@ Item {
         onActivated: webViewRoot.findBarVisible = true
     }
 
+    // Tabs. The page lets these through (WebSurface::isHostShortcut).
+    Shortcut {
+        sequence: StandardKey.AddTab
+        onActivated: webViewRoot.newTab()
+    }
+    Shortcut {
+        sequences: [StandardKey.Close]
+        enabled: webview.tabs.length > 1
+        onActivated: webview.closeTab(webview.currentTab)
+    }
+    Shortcut {
+        sequences: [StandardKey.NextChild, "Ctrl+PgDown"]
+        enabled: webview.tabs.length > 1
+        onActivated: webview.cycleTab(1)
+    }
+    Shortcut {
+        sequences: [StandardKey.PreviousChild, "Ctrl+PgUp"]
+        enabled: webview.tabs.length > 1
+        onActivated: webview.cycleTab(-1)
+    }
+
     ContextMenu {
         id: contextMenu
         webviewItem: webview
         onReloadRequested: webViewRoot.reloadPage()
+        onNewTabRequested: url => webViewRoot.newTab(url)
     }
 
     FileDialog {
@@ -203,7 +231,7 @@ Item {
         id: webview
 
         anchors.fill: parent
-        anchors.topMargin: popupBar.visible ? popupBar.height + Kirigami.Units.smallSpacing * 2 : 0
+        anchors.topMargin: tabStrip.visible ? tabStrip.height + Kirigami.Units.smallSpacing : 0
 
         url: plasmoid.configuration.url
         profileDirectory: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, '') + "/chatai-plasmoid/" + webViewRoot.effectiveProfileName
@@ -220,6 +248,11 @@ Item {
         playbackRequiresUserGesture: plasmoid.configuration.playbackRequiresUserGesture
         spatialNavigation: plasmoid.configuration.spatialNavigationEnabled
         popupsInPlace: true
+        linksInTabs: plasmoid.configuration.linksInTabs
+        // The other tabs of the last session (the first one is the start page).
+        restoreTabs: plasmoid.configuration.reopenTabs ? plasmoid.configuration.openTabs : []
+
+        onTabsChanged: saveTabsTimer.restart()
 
         // These are engine start options: apply them right away.
         onGpuRenderingChanged: if (running) restartEngine()
@@ -287,6 +320,19 @@ Item {
         onEngineCrashed: console.warn("ChatAI: web engine restarted after a crash")
     }
 
+    // Save the open tabs (all but the first), to reopen them next time.
+    Timer {
+        id: saveTabsTimer
+        interval: 1000
+        onTriggered: {
+            if (!webview.running || webview.tabs.length === 0)
+                return;
+            const extra = webview.tabUrls.slice(1);
+            if (JSON.stringify(extra) !== JSON.stringify(plasmoid.configuration.openTabs))
+                plasmoid.configuration.openTabs = extra;
+        }
+    }
+
     // Shown while the engine is not up yet (first start, or after an idle unload).
     PlasmaComponents3.BusyIndicator {
         anchors.centerIn: parent
@@ -308,41 +354,22 @@ Item {
         }
     }
 
-    // OAuth / "Sign in with ..." windows open on top of the chat.
-    GlassPanel {
-        id: popupBar
+    // Open tabs (sign-in popups included), when there is more than one.
+    TabStrip {
+        id: tabStrip
 
-        visible: webview.popupOpen
-        height: visible ? popupRow.implicitHeight + Kirigami.Units.smallSpacing * 2 : 0
+        webviewItem: webview
+        visible: webview.tabs.length > 1
+        height: visible ? implicitHeight : 0
         z: 5
         anchors {
             top: parent.top
             left: parent.left
             right: parent.right
-            margins: Kirigami.Units.smallSpacing
+            leftMargin: Kirigami.Units.smallSpacing
+            rightMargin: Kirigami.Units.smallSpacing
         }
-
-        RowLayout {
-            id: popupRow
-            anchors.fill: parent
-            anchors.margins: Kirigami.Units.smallSpacing
-
-            Kirigami.Icon {
-                source: "window-new"
-                Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                Layout.preferredHeight: Kirigami.Units.iconSizes.small
-            }
-            PlasmaComponents3.Label {
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-                text: webview.title || i18n("Popup window")
-            }
-            PlasmaComponents3.ToolButton {
-                icon.name: "window-close"
-                text: i18n("Close")
-                onClicked: webview.closePopup()
-            }
-        }
+        onNewTabRequested: webViewRoot.newTab()
     }
 
     // Thin accent line while loading.

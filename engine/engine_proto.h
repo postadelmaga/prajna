@@ -124,7 +124,8 @@ enum {
   ZURF_EV_TITLE = 64,      /* i32 tab id + utf-8 */
   ZURF_EV_URL = 65,        /* i32 tab id + utf-8 */
   ZURF_EV_READY = 66,      /* - */
-  ZURF_EV_TAB = 67,        /* i32 — tab created (now active) */
+  ZURF_EV_TAB = 67,        /* i32 id [+ i32 opener id + i32 ZURF_TAB_*] — tab
+                            * created or switched to (now active) */
   ZURF_EV_TAB_CLOSED = 68, /* i32 */
   ZURF_EV_CLIPBOARD = 69,  /* utf-8 selection text (answer to ZURF_OP_COPY) */
   ZURF_EV_JS_RESULT = 70,  /* i32 request id + utf-8 ("" on error) */
@@ -180,6 +181,11 @@ enum {
   ZURF_DL_STARTED = 4,
 };
 
+/* ZURF_EV_TAB flags */
+enum {
+  ZURF_TAB_POPUP = 1, /* opened by a script (window.open): closes itself */
+};
+
 /* Clipboard blob: repeated { u32 mime_len | mime | u32 data_len | data }.
  * "text/plain;charset=utf-8" is the text entry; images travel as image/png. */
 
@@ -191,7 +197,9 @@ enum {
  *   js-clipboard       allow navigator.clipboard / execCommand copy-paste
  *   media-gesture      media playback requires a user gesture
  *   spatial-nav        spatial navigation
- *   new-window-policy  "popup" (auth popups as tabs) | "external" (all to host)
+ *   new-window-policy  "popup" (script windows as tabs, links to host) |
+ *                      "tabs" (links that open a new window too) |
+ *                      "external" (all to host)
  *   max-fps            frame rate cap (5..240; default 30, also --max-fps)
  *   transparent        1 = see-through page background (frames carry alpha)
  */
