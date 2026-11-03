@@ -13,125 +13,49 @@ import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 
 import "../lib/chatai"
+import "sites.js" as Sites
 
 // Main plasmoid item that contains all the widget functionality
 PlasmoidItem {
     id: root
 
-    // Define the available chat models and their properties
-    // This property combines both predefined and custom sites
-    property var models: {
-        // Define base models with their default properties
-        let baseModels = [
-            {
-                "id": "t3",
-                "url": "https://t3.chat",
-                "text": "T3 Chat",
-                "prop": "showT3Chat"
-            },
-            {
-                "id": "duckduckgo",
-                "url": "https://duckduckgo.com/chat",
-                "text": "DuckDuckGo Chat",
-                "prop": "showDuckDuckGoChat"
-            },
-            {
-                "id": "chatgpt",
-                "url": "https://chatgpt.com",
-                "text": "ChatGPT",
-                "prop": "showChatGPT"
-            },
-            {
-                "id": "huggingface",
-                "url": "https://huggingface.co/chat",
-                "text": "HuggingChat",
-                "prop": "showHugginChat"
-            },
-            {
-                "id": "copilot",
-                "url": "https://copilot.microsoft.com/",
-                "text": "Bing Copilot",
-                "prop": "showBingCopilot"
-            },
-            {
-                "id": "google",
-                "url": "https://gemini.google.com/app",
-                "text": "Google Gemini",
-                "prop": "showGoogleGemini"
-            },
-            {
-                "id": "blackbox",
-                "url": "https://www.blackbox.ai",
-                "text": "BlackBox AI",
-                "prop": "showBlackBox"
-            },
-            {
-                "id": "you",
-                "url": "https://you.com/?chatMode=default",
-                "text": "You",
-                "prop": "showYou"
-            },
-            {
-                "id": "perplexity",
-                "url": "https://www.perplexity.ai",
-                "text": "Perplexity",
-                "prop": "showPerplexity"
-            },
-            {
-                "id": "lobechat",
-                "url": "https://lobechat.com/chat",
-                "text": "LobeChat",
-                "prop": "showLobeChat"
-            },
-            {
-                "id": "bigagi",
-                "url": "https://get.big-agi.com",
-                "text": "Big-AGI",
-                "prop": "showBigAGI"
-            },
-            {
-                "id": "claude",
-                "url": "https://claude.ai/new",
-                "text": "Claude",
-                "prop": "showClaude"
-            },
-            {
-                "id": "deepseek",
-                "url": "https://chat.deepseek.com",
-                "text": "DeepSeek",
-                "prop": "showDeepSeek"
-            },
-            {
-                "id": "meta",
-                "url": "https://www.meta.ai",
-                "text": "Meta AI",
-                "prop": "showMetaAI"
-            },
-            {
-                "id": "grok",
-                "url": "https://x.com/i/grok",
-                "text": "Grok",
-                "prop": "showGrok"
+    // Chat services: the built-in ones (sites.js) plus the user's custom
+    // sites, which are always listed.
+    property var models: Sites.predefined.concat(Sites.parseCustom(plasmoid.configuration.customSites).map(site => ({
+        "id": site.text.toLowerCase().replace(/\s+/g, '-'),
+        "url": site.url,
+        "text": site.text,
+        "prop": "showCustom_" + site.text.toLowerCase().replace(/\s+/g, '_')
+    })))
+
+    // The web area (WebView.qml), once the popup has been created.
+    readonly property var webviewRoot: fullRepresentationItem ? fullRepresentationItem.webviewRoot : null
+
+    // Right-click menu of the widget icon: works even with the header hidden.
+    Plasmoid.contextualActions: [
+        PlasmaCore.Action {
+            text: i18n("Go to Start Page")
+            icon.name: "go-home"
+            onTriggered: {
+                root.expanded = true;
+                if (root.webviewRoot)
+                    root.webviewRoot.goBackToHomePage();
             }
-        ];
-        // Add custom sites from configuration to the models list
-        let customSites = plasmoid.configuration.customSites || [];
-        if (Array.isArray(customSites)) {
-            customSites.forEach(site => {
-                if (site && typeof site === 'string' && site.includes('|')) {
-                    const [name, url] = site.split('|');
-                    if (name && url)
-                        baseModels.push({
-                            "id": name.toLowerCase().replace(/\s+/g, '-'),
-                            "url": url,
-                            "text": name,
-                            "prop": "showCustom_" + name.toLowerCase().replace(/\s+/g, '_')
-                        });
-                }
-            });
+        },
+        PlasmaCore.Action {
+            text: i18n("Reload Page")
+            icon.name: "view-refresh"
+            enabled: root.webviewRoot !== null
+            onTriggered: root.webviewRoot.reloadPage()
+        },
+        PlasmaCore.Action {
+            text: i18n("Keep Open")
+            icon.name: "window-pin"
+            checkable: true
+            checked: plasmoid.configuration.pin
+            onTriggered: plasmoid.configuration.pin = checked
         }
-        return baseModels;
-    }
+    ]
 
     // Initialize the plasmoid and check if it should load on startup
     Component.onCompleted: {

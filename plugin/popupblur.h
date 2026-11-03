@@ -35,7 +35,7 @@ public:
 
     bool blur() const { return m_blur; }
     void setBlur(bool on);
-    bool isAvailable() const;
+    bool isAvailable() const { return m_available; }
 
 Q_SIGNALS:
     void blurChanged();
@@ -49,12 +49,14 @@ private Q_SLOTS:
 
 private:
     void attach(QQuickWindow *window);
+    void updateAvailable();
     void apply();
     QObject *findFrame(QQuickItem *item) const;
 
     bool m_blur = true;
     bool m_restore = false; // blur was turned back on: re-apply once
     bool m_pending = false;
+    bool m_available = false;
     QPointer<QQuickWindow> m_window;
     QPointer<QObject> m_frame;
     QList<QMetaObject::Connection> m_connections;

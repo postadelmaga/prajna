@@ -1,6 +1,7 @@
 /*
  *  SPDX-FileCopyrightText: 2024 Denys Madureira <denysmb@zoho.com>
  *  SPDX-FileCopyrightText: 2025 Bruno Gonçalves <bigbruno@gmail.com>
+ *  SPDX-FileCopyrightText: 2026 Francesco Magazzu
  *
  *  SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
  */
@@ -9,226 +10,183 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 
-import org.kde.kirigami 2.20 as Kirigami
+import org.kde.kirigami as Kirigami
 import org.kde.iconthemes as KIconThemes
 import org.kde.kcmutils as KCM
 
 import "../lib/chatai"
 
 KCM.SimpleKCM {
+    id: page
+
     // Icon mode constants (must match CompactRepresentation.qml)
-    readonly property int iconModeFavicon: 0
-    readonly property int iconModeAdaptive: 1
-    readonly property int iconModeDark: 2
-    readonly property int iconModeLight: 3
-    readonly property int iconModeOutlined: 4
-    readonly property int iconModeFilled: 5
-    readonly property int iconModeColorful: 6
     readonly property int iconModeCustom: 7
 
-    property alias cfg_iconMode: iconMode.currentIndex
-    property string cfg_customIcon: plasmoid.configuration.customIcon
+    property bool cfg_transparentBackground
+    property bool cfg_blurBehind
+    property int cfg_iconMode
+    property string cfg_customIcon
+    property bool cfg_hideHeader
+    property bool cfg_autoHideHeader
+    property bool cfg_hideNavigationButtons
+    property bool cfg_hideKeepOpen
+    property bool cfg_hideCloseButton
+    property bool cfg_hideHomeButton
+    property bool cfg_hideRefreshButton
+    property bool cfg_hidePrintButton // the auto-hide toggle (historical name)
+    property bool cfg_hideDownloadButton
 
-    leftPadding: 0
-    rightPadding: 0
+    // Small grey explanation under a control.
+    component Hint: QQC2.Label {
+        Layout.fillWidth: true
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+        wrapMode: Text.Wrap
+        font: Kirigami.Theme.smallFont
+        opacity: 0.7
+    }
+
+    PopupBlur {
+        id: blurInfo
+        visible: false
+    }
 
     Kirigami.FormLayout {
-        anchors.left: parent.left
-        width: Math.min(parent.width, Kirigami.Units.gridUnit * 25)
-
-        QQC2.ComboBox {
-            id: iconMode
-            Kirigami.FormData.label: i18n("Icon:")
-            model: [
-                i18n("Use website favicon"),
-                i18n("Default adaptive icon"),
-                i18n("Default dark icon"),
-                i18n("Default light icon"),
-                i18n("Outlined icon"),
-                i18n("Filled icon"),
-                i18n("Colorful icon"),
-                i18n("Custom icon")
-            ]
-            Layout.fillWidth: true
+        QQC2.CheckBox {
+            Kirigami.FormData.label: i18n("Popup:")
+            text: i18n("Transparent page background")
+            checked: page.cfg_transparentBackground
+            onToggled: page.cfg_transparentBackground = checked
         }
-
-        QQC2.Button {
-            id: iconButton
-            visible: iconMode.currentIndex === iconModeCustom
-            Kirigami.FormData.label: i18n("Custom Icon:")
-            implicitWidth: previewFrame.width + Kirigami.Units.smallSpacing * 2
-            implicitHeight: previewFrame.height + Kirigami.Units.smallSpacing * 2
-            hoverEnabled: true
-
-            KIconThemes.IconDialog {
-                id: iconDialog
-                onIconNameChanged: {
-                    if (iconName) {
-                        cfg_customIcon = iconName
-                        plasmoid.configuration.customIcon = iconName
-                    }
-                }
-            }
-
-            onClicked: iconDialog.open()
-
-            Kirigami.Icon {
-                id: previewFrame
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.large
-                height: width
-                source: cfg_customIcon || "help-about"
-            }
-        }
-
-        // Separator between icon and header sections
-        Kirigami.Separator {
-            Kirigami.FormData.isSection: true
-            Layout.fillWidth: true
-        }
-
-        PopupBlur {
-            id: blurInfo
-            visible: false
+        Hint {
+            text: i18n("The site's own background disappears; messages, menus and the text box keep their colours.")
         }
 
         QQC2.CheckBox {
-            Kirigami.FormData.label: i18n("Look:")
-            text: i18n("Blur behind the popup")
-            checked: plasmoid.configuration.blurBehind
-            onToggled: plasmoid.configuration.blurBehind = checked
+            text: i18n("Blur what is behind the popup")
+            checked: page.cfg_blurBehind
+            onToggled: page.cfg_blurBehind = checked
+            enabled: blurInfo.available
+        }
+        Hint {
+            visible: blurInfo.available && page.cfg_transparentBackground && !page.cfg_blurBehind
+            text: i18n("Without blur the desktop shows through sharply, which can make text harder to read.")
         }
 
         Kirigami.InlineMessage {
             Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
             type: Kirigami.MessageType.Warning
             visible: !blurInfo.available
-            text: i18n("The Blur desktop effect is off: enable it in System Settings → Window Management → Desktop Effects.")
-        }
-
-        QQC2.CheckBox {
-            text: i18n("Transparent page background")
-            checked: plasmoid.configuration.transparentBackground
-            onToggled: plasmoid.configuration.transparentBackground = checked
-        }
-
-        QQC2.Label {
-            Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            font: Kirigami.Theme.smallFont
-            opacity: 0.7
-            text: i18n("The site's background becomes see-through and the blurred desktop shows behind the chat; text boxes, menus and messages keep their colours. Needs the Blur desktop effect for best readability.")
+            text: i18n("The Blur desktop effect is turned off.")
+            actions: Kirigami.Action {
+                icon.name: "preferences-desktop-effects"
+                text: i18n("Desktop Effects…")
+                onTriggered: KCM.KCMLauncher.openSystemSettings("kcm_kwin_effects")
+            }
         }
 
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
-            Layout.fillWidth: true
+            Kirigami.FormData.label: i18n("Panel icon")
         }
 
-        // Header Options section
-        QQC2.Label {
-            Kirigami.FormData.label: i18n("Header Options")
-            font.bold: true
-            Layout.fillWidth: true
+        RowLayout {
+            Kirigami.FormData.label: i18n("Icon:")
+
+            QQC2.ComboBox {
+                model: [
+                    i18n("Website icon"),
+                    i18n("Adaptive"),
+                    i18n("Dark"),
+                    i18n("Light"),
+                    i18n("Outlined"),
+                    i18n("Filled"),
+                    i18n("Colorful"),
+                    i18n("Custom…")
+                ]
+                currentIndex: page.cfg_iconMode
+                onActivated: index => page.cfg_iconMode = index
+            }
+
+            QQC2.Button {
+                visible: page.cfg_iconMode === page.iconModeCustom
+                icon.name: page.cfg_customIcon || "help-about"
+                text: i18n("Choose…")
+                onClicked: iconDialog.open()
+
+                KIconThemes.IconDialog {
+                    id: iconDialog
+                    onIconNameChanged: if (iconName) page.cfg_customIcon = iconName
+                }
+            }
         }
 
-        // Header visibility option
-        QQC2.CheckBox {
-            id: hideHeader
-
-            text: i18n("Hide Header")
-            checked: plasmoid.configuration.hideHeader
-            onCheckedChanged: plasmoid.configuration.hideHeader = checked
-            Layout.fillWidth: true
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Top bar")
         }
 
-        QQC2.CheckBox {
-            id: autoHideHeader
-            text: i18n("Auto-hide Header (show on mouse hover)")
-            checked: plasmoid.configuration.autoHideHeader
-            onCheckedChanged: plasmoid.configuration.autoHideHeader = checked
-            enabled: !hideHeader.checked
-            Layout.fillWidth: true
+        QQC2.ComboBox {
+            Kirigami.FormData.label: i18n("Show:")
+            model: [i18n("Always"), i18n("When the mouse is near the top"), i18n("Never")]
+            currentIndex: page.cfg_hideHeader ? 2 : (page.cfg_autoHideHeader ? 1 : 0)
+            onActivated: index => {
+                page.cfg_hideHeader = index === 2;
+                page.cfg_autoHideHeader = index === 1;
+            }
+        }
+        Hint {
+            visible: page.cfg_hideHeader
+            text: i18n("Start page, reload and \"keep open\" stay available by right-clicking the panel icon.")
         }
 
-        // Hide various header buttons
-        QQC2.CheckBox {
-            id: hideKeepOpen
+        ColumnLayout {
+            Kirigami.FormData.label: i18n("Buttons:")
+            enabled: !page.cfg_hideHeader
+            spacing: 0
 
-            text: i18n("Hide Keep Open button")
-            checked: plasmoid.configuration.hideKeepOpen
-            onCheckedChanged: plasmoid.configuration.hideKeepOpen = checked
-            Layout.fillWidth: true
+            QQC2.CheckBox {
+                text: i18n("Back and forward")
+                checked: !page.cfg_hideNavigationButtons
+                onToggled: page.cfg_hideNavigationButtons = !checked
+            }
+            QQC2.CheckBox {
+                text: i18n("Keep open")
+                checked: !page.cfg_hideKeepOpen
+                onToggled: page.cfg_hideKeepOpen = !checked
+            }
+            QQC2.CheckBox {
+                text: i18n("Close")
+                checked: !page.cfg_hideCloseButton
+                onToggled: page.cfg_hideCloseButton = !checked
+            }
         }
 
-        QQC2.CheckBox {
-            id: hideCustomURL
+        ColumnLayout {
+            Kirigami.FormData.label: i18n("In the ⋯ menu:")
+            enabled: !page.cfg_hideHeader
+            spacing: 0
 
-            text: i18n("Hide Custom URL button")
-            checked: plasmoid.configuration.hideCustomURL
-            onCheckedChanged: plasmoid.configuration.hideCustomURL = checked
-            Layout.fillWidth: true
-        }
-
-        QQC2.CheckBox {
-            id: hidePrintButton
-
-            text: i18n("Hide Auto-Hide button")
-            checked: plasmoid.configuration.hidePrintButton
-            onCheckedChanged: plasmoid.configuration.hidePrintButton = checked
-            Layout.fillWidth: true
-        }
-
-        QQC2.CheckBox {
-            id: hideCloseButton
-
-            text: i18n("Hide Close button")
-            checked: plasmoid.configuration.hideCloseButton
-            onCheckedChanged: plasmoid.configuration.hideCloseButton = checked
-            Layout.fillWidth: true
-        }
-
-        QQC2.CheckBox {
-            id: hideHomeButton
-
-            text: i18n("Hide Home button")
-            checked: plasmoid.configuration.hideHomeButton
-            onCheckedChanged: plasmoid.configuration.hideHomeButton = checked
-            Layout.fillWidth: true
-        }
-
-        QQC2.CheckBox {
-            id: hideDownloadButton
-
-            text: i18n("Hide Download button")
-            checked: plasmoid.configuration.hideDownloadButton
-            onCheckedChanged: plasmoid.configuration.hideDownloadButton = checked
-            Layout.fillWidth: true
-        }
-
-        QQC2.CheckBox {
-            id: hideNavigationButtons
-
-            text: i18n("Hide Navigation buttons")
-            checked: plasmoid.configuration.hideNavigationButtons
-            onCheckedChanged: plasmoid.configuration.hideNavigationButtons = checked
-            Layout.fillWidth: true
-        }
-
-        QQC2.CheckBox {
-            id: hideRefreshButton
-
-            text: i18n("Hide Refresh button")
-            checked: plasmoid.configuration.hideRefreshButton
-            onCheckedChanged: plasmoid.configuration.hideRefreshButton = checked
-            Layout.fillWidth: true
-        }
-
-        // Information message about hidden functionality
-        Kirigami.InlineMessage {
-            Layout.fillWidth: true
-            text: i18n("You can still use the Go back to... and Keep open actions by right-clicking the widget icon.")
-            visible: hideHeader.checked || hideKeepOpen.checked
+            QQC2.CheckBox {
+                text: i18n("Start page")
+                checked: !page.cfg_hideHomeButton
+                onToggled: page.cfg_hideHomeButton = !checked
+            }
+            QQC2.CheckBox {
+                text: i18n("Reload")
+                checked: !page.cfg_hideRefreshButton
+                onToggled: page.cfg_hideRefreshButton = !checked
+            }
+            QQC2.CheckBox {
+                text: i18n("Auto-hide toggle")
+                checked: !page.cfg_hidePrintButton
+                onToggled: page.cfg_hidePrintButton = !checked
+            }
+            QQC2.CheckBox {
+                text: i18n("Downloads")
+                checked: !page.cfg_hideDownloadButton
+                onToggled: page.cfg_hideDownloadButton = !checked
+            }
         }
     }
 }

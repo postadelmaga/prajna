@@ -41,5 +41,7 @@ endif()
 # The plasmoid package itself (pure QML + assets + translations).
 install(FILES metadata.json DESTINATION ${CHATAI_PACKAGE_DIR})
 install(DIRECTORY contents DESTINATION ${CHATAI_PACKAGE_DIR})
+# Lets website notifications show up without any manual setup.
+install(FILES data/chatai_plasmoid.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR})
 
 feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

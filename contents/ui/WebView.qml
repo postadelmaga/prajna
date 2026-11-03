@@ -225,6 +225,11 @@ Item {
         spatialNavigation: plasmoid.configuration.spatialNavigationEnabled
         popupsInPlace: true
 
+        // These are engine start options: apply them right away.
+        onGpuRenderingChanged: if (running) restartEngine()
+        onJavascriptJitChanged: if (running) restartEngine()
+        onMemoryLimitMbChanged: if (running) restartEngine()
+
         property bool wasLoading: false
         onLoadStateChanged: {
             if (wasLoading && !loading)

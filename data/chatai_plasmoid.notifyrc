@@ -1,0 +1,9 @@
+[Global]
+IconName=applications-internet
+Comment=ChatAI
+Name=ChatAI
+
+[Event/notification]
+Name=Website notification
+Comment=A chat website sent a notification
+Action=Popup

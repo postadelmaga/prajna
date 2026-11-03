@@ -18,11 +18,20 @@ Q_LOGGING_CATEGORY(lcBlur, "chatai.blur", QtInfoMsg)
 PopupBlur::PopupBlur(QQuickItem *parent)
     : QQuickItem(parent)
 {
+    updateAvailable();
+    for (int ms : {200, 1000, 3000})
+        QTimer::singleShot(ms, this, &PopupBlur::updateAvailable);
 }
 
-bool PopupBlur::isAvailable() const
+// On Wayland KWin announces the blur protocol asynchronously, so the first
+// answer can be "no": check again shortly after.
+void PopupBlur::updateAvailable()
 {
-    return KWindowEffects::isEffectAvailable(KWindowEffects::BlurBehind);
+    const bool now = KWindowEffects::isEffectAvailable(KWindowEffects::BlurBehind);
+    if (now != m_available) {
+        m_available = now;
+        Q_EMIT availableChanged();
+    }
 }
 
 void PopupBlur::setBlur(bool on)
@@ -49,6 +58,7 @@ void PopupBlur::attach(QQuickWindow *window)
     m_connections.clear();
     m_window = window;
     m_frame = nullptr;
+    updateAvailable();
     if (!window)
         return;
     // Plasma re-applies its own blur on these; follow right after it.
@@ -100,10 +110,8 @@ void PopupBlur::apply()
             if (changed.isValid() && slot.isValid())
                 m_connections << connect(m_frame, changed, this, slot);
         }
-        static bool reported = false;
-        if (m_frame || !reported)
-            qCInfo(lcBlur) << "popup frame" << (m_frame ? "found" : "not found yet") << "blur" << m_blur;
-        reported = true;
+        if (m_frame)
+            qCInfo(lcBlur) << "popup frame found, blur" << m_blur;
     }
     if (m_blur) {
         // Plasma's blur is the default: only restore it after we removed it.

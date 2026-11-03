@@ -14,6 +14,8 @@ import org.kde.kirigami as Kirigami
 
 import Qt.labs.platform 1.1
 
+import "sites.js" as Sites
+
 RowLayout {
     Layout.fillWidth: true
 
@@ -28,14 +30,7 @@ RowLayout {
     // Properties for managing component state
     property var closeWebViewCallback: undefined    // Callback function for closing webview
     property var models                            // Available chat models
-    property bool showCustomURLInput: false        // Toggle between URL selector and custom URL input
     property var webview: (parent && parent.webviewRoot) ? parent.webviewRoot.webview : null
-
-    // Utility function to ensure URL has a valid protocol
-    function sanitizeUrl(url) {
-        if (!url || typeof url !== 'string') return '';
-        return url.match(/^https?:\/\//i) ? url : "https://" + url;
-    }
 
     spacing: Kirigami.Units.smallSpacing / 2
 
@@ -66,63 +61,36 @@ RowLayout {
         onClicked: navigateForwardRequested()
     }
 
-    // URL Selection components
+    // Site selector. Entries are {text, url}; the optional last entry
+    // ("Custom URL…", empty url) turns the box into an address field.
     PlasmaComponents3.ComboBox {
         id: urlComboBox
+
+        readonly property bool customSelected: currentIndex >= 0 && currentIndex < model.length && model[currentIndex].url === ""
+
         Layout.fillWidth: true
         flat: !editable
-        PlasmaComponents3.ToolTip.text: i18n("Select or enter chat website URL")
-        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
-        PlasmaComponents3.ToolTip.visible: hovered && !pressed
         model: []
-        editable: currentIndex === count - 1
-
-        property string customUrlText: ""
-
-        displayText: {
-            if (currentIndex === count - 1 && editable) {
-                return customUrlText || "";
-            }
-            return currentText;
-        }
+        textRole: "text"
+        valueRole: "url"
+        editable: customSelected
+        PlasmaComponents3.ToolTip.text: i18n("Choose the chat site")
+        PlasmaComponents3.ToolTip.delay: Kirigami.Units.toolTipDelay
+        PlasmaComponents3.ToolTip.visible: hovered && !pressed && !editable
 
         onActivated: {
-            if (currentIndex === count - 1) {
-                editable = true;
-                customUrlText = "";
+            if (customSelected) {
                 editText = "";
-                Qt.callLater(() => {
-                    forceActiveFocus();
-                    if (urlComboBox.hasOwnProperty("textField")) {
-                        urlComboBox.textField.forceActiveFocus();
-                    }
-                });
-            } else {
-                editable = false;
-                handleModelSelection();
+                Qt.callLater(() => urlComboBox.forceActiveFocus());
+            } else if (currentValue) {
+                openSite(currentValue);
             }
         }
-
-        onEditTextChanged: {
-            if (currentIndex === count - 1) {
-                customUrlText = editText;
-            }
-        }
-
-        Keys.onReturnPressed: event => {
-            if (currentIndex === count - 1 && editText) {
-                plasmoid.configuration.url = sanitizeUrl(editText);
-                goBackToHomePage();
-                event.accepted = true;
-            }
-        }
-
         onAccepted: {
-            if (currentIndex === count - 1 && editText) {
-                plasmoid.configuration.url = sanitizeUrl(editText);
-                goBackToHomePage();
-            }
+            if (customSelected && editText.trim())
+                openSite(Sites.sanitizeUrl(editText));
         }
+        Keys.onEscapePressed: renderChatModel()
 
         Component.onCompleted: renderChatModel()
     }
@@ -217,77 +185,26 @@ RowLayout {
         onClicked: closeWebViewCallback?.()
     }
 
-    // Helper Functions
-    // Returns the number of available chat models
-    function getModelsLength() {
-        return urlComboBox.model.length;
+    function openSite(url) {
+        plasmoid.configuration.url = url;
+        goBackToHomePage();
     }
 
-    // Updates the chat model list and current selection
-    // Handles both predefined and custom chat models
+    // Rebuilds the site list and selects the current site.
     function renderChatModel() {
-        // Create model list from enabled predefined models
-        const chatModel = models.filter(model => !model.prop.startsWith("showCustom_") && plasmoid.configuration[model.prop]).map(model => model.text)
-        // Add custom sites to the model list
-        .concat((plasmoid.configuration.customSites || "").split(',').filter(site => site?.includes('|')).map(site => site.split('|')[0])).concat([i18n("Custom URL...")]);
-
-        // Update ComboBox model and select current item
-        urlComboBox.model = chatModel;
-
-        const currentUrl = plasmoid.configuration.url;
-        const currentModel = models.find(model => !model.prop.startsWith("showCustom_") && model.url === currentUrl);
-
-        if (currentModel) {
-            const index = chatModel.indexOf(currentModel.text);
-            urlComboBox.currentIndex = index;
-            urlComboBox.editable = false;
-        } else {
-            const customSite = (plasmoid.configuration.customSites || "").split(',').find(site => site?.includes('|') && site.split('|')[1] === currentUrl);
-
-            if (customSite) {
-                const siteName = customSite.split('|')[0];
-                const index = chatModel.indexOf(siteName);
-                urlComboBox.currentIndex = index;
-                urlComboBox.editable = false;
-            } else {
-                urlComboBox.currentIndex = chatModel.length - 1;
-                urlComboBox.customUrlText = currentUrl;
-                urlComboBox.editText = currentUrl;
-                urlComboBox.editable = true;
-            }
+        const current = plasmoid.configuration.url;
+        const list = models
+            .filter(m => m.prop.startsWith("showCustom_") || plasmoid.configuration[m.prop] || m.url === current)
+            .map(m => ({ "text": m.text, "url": m.url }));
+        // A typed address: show it as its host name.
+        if (current && !list.some(m => m.url === current)) {
+            const host = current.replace(/^[a-z]+:\/\//i, "").split("/")[0];
+            list.push({ "text": host || current, "url": current });
         }
-    }
-
-    // Handles model selection from ComboBox
-    // Updates current URL and navigates to selected chat
-    function handleModelSelection() {
-        if (urlComboBox.currentIndex === urlComboBox.count - 1) {
-            // Custom URL handling
-            const url = urlComboBox.editText;
-            if (url) {
-                plasmoid.configuration.url = sanitizeUrl(url);
-                goBackToHomePage();
-            }
-            return;
-        }
-
-        const selectedText = urlComboBox.currentValue;
-        if (!selectedText)
-            return;
-        urlComboBox.displayText = selectedText;
-
-        const selectedModel = models.find(model => !model.prop.startsWith("showCustom_") && model.text === selectedText);
-        if (selectedModel) {
-            plasmoid.configuration.url = selectedModel.url;
-            goBackToHomePage();
-            return;
-        }
-
-        const customSite = (plasmoid.configuration.customSites || "").split(',').find(site => site?.split('|')[0] === selectedText);
-        if (customSite) {
-            plasmoid.configuration.url = customSite.split('|')[1];
-            goBackToHomePage();
-        }
+        if (!plasmoid.configuration.hideCustomURL)
+            list.push({ "text": i18n("Custom URL…"), "url": "" });
+        urlComboBox.model = list;
+        urlComboBox.currentIndex = list.findIndex(m => m.url === current);
     }
 
     Binding {
@@ -304,24 +221,12 @@ RowLayout {
         onTriggered: renderChatModel()
     }
 
-    // Configuration change handler - debounced to prevent multiple rapid re-renders
+    // Rebuild when the url or any site setting changes (debounced).
     Connections {
         target: plasmoid.configuration
-        function onCustomSitesChanged() { modelUpdateTimer.restart() }
-        function onShowT3ChatChanged() { modelUpdateTimer.restart() }
-        function onShowDuckDuckGoChatChanged() { modelUpdateTimer.restart() }
-        function onShowChatGPTChanged() { modelUpdateTimer.restart() }
-        function onShowHugginChatChanged() { modelUpdateTimer.restart() }
-        function onShowGoogleGeminiChanged() { modelUpdateTimer.restart() }
-        function onShowYouChanged() { modelUpdateTimer.restart() }
-        function onShowPerplexityChanged() { modelUpdateTimer.restart() }
-        function onShowLobeChatChanged() { modelUpdateTimer.restart() }
-        function onShowBigAGIChanged() { modelUpdateTimer.restart() }
-        function onShowBlackBoxChanged() { modelUpdateTimer.restart() }
-        function onShowBingCopilotChanged() { modelUpdateTimer.restart() }
-        function onShowClaudeChanged() { modelUpdateTimer.restart() }
-        function onShowDeepSeekChanged() { modelUpdateTimer.restart() }
-        function onShowMetaAIChanged() { modelUpdateTimer.restart() }
-        function onShowGrokChanged() { modelUpdateTimer.restart() }
+        function onValueChanged(key, value) {
+            if (key === "url" || key === "customSites" || key === "hideCustomURL" || key.startsWith("show"))
+                modelUpdateTimer.restart();
+        }
     }
 }

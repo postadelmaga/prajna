@@ -11,14 +11,26 @@ import org.kde.plasma.configuration
 
 ConfigModel {
     ConfigCategory {
-        name: i18n("General")
-        icon: "plasma"
-        source: "ConfigGeneral.qml"
+        name: i18n("Sites")
+        icon: "internet-web-browser"
+        source: "ConfigSites.qml"
     }
 
     ConfigCategory {
         name: i18n("Appearance")
         icon: "preferences-desktop-color"
         source: "ConfigAppearance.qml"
+    }
+
+    ConfigCategory {
+        name: i18n("Privacy")
+        icon: "preferences-system-privacy"
+        source: "ConfigPrivacy.qml"
+    }
+
+    ConfigCategory {
+        name: i18n("Engine")
+        icon: "preferences-system-performance"
+        source: "ConfigEngine.qml"
     }
 }
