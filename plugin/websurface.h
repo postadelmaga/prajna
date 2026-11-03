@@ -7,6 +7,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QImage>
 #include <QJSValue>
@@ -340,6 +341,10 @@ private:
     int m_sessionExpected = 0; // tab count once restored (0 = not restoring)
     QStringList m_restoreTabs;
     bool m_restoreUsed = false;
+    // start-up timeline, logged once per engine start
+    QElapsedTimer m_startClock;
+    bool m_loggedFrame = false;
+    bool m_loggedLoad = false;
 
     QString m_userAgent;
     QString m_downloadDir;

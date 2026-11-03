@@ -11,7 +11,8 @@ add.
   with an optional fine grain. Messages, menus and the text box keep their
   colours.
 - **Tabs**: Ctrl+T, Ctrl+W, Ctrl+Tab; links can open in a new tab or in your
-  browser; the open tabs come back after a restart.
+  browser; the open tabs come back after a restart (each loads when you
+  open it, so a big session doesn't slow down the start).
 - **Light on resources**: no Chromium inside Plasma (see below); the engine
   is paused while the popup is closed and stopped after a while, releasing
   all its memory; pages are drawn on the integrated GPU.

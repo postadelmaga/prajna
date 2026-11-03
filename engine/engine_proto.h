@@ -111,6 +111,8 @@ enum {
   ZURF_OP_EDIT = 44,                /* utf-8 WebKit editing command name
                                      * ("Copy", "Cut", "Paste", "SelectAll", ...) */
   ZURF_OP_RELOAD_BYPASS = 45,       /* - reload ignoring cache */
+  ZURF_OP_TAB_NEW_BACKGROUND = 46, /* url — a tab that loads only once
+                                    * switched to (restored sessions) */
 };
 
 enum {
@@ -183,7 +185,8 @@ enum {
 
 /* ZURF_EV_TAB flags */
 enum {
-  ZURF_TAB_POPUP = 1, /* opened by a script (window.open): closes itself */
+  ZURF_TAB_POPUP = 1,      /* opened by a script (window.open): closes itself */
+  ZURF_TAB_BACKGROUND = 2, /* created in the background (not the active tab) */
 };
 
 /* Clipboard blob: repeated { u32 mime_len | mime | u32 data_len | data }.

@@ -520,8 +520,9 @@ void WebSurface::restoreSession()
     if (extra.isEmpty())
         return;
     m_sessionExpected = extra.size() + 1;
+    // Background tabs load only when switched to.
     for (const QString &u : extra)
-        send(ZURF_OP_TAB_NEW, u.toUtf8());
+        send(ZURF_OP_TAB_NEW_BACKGROUND, u.toUtf8());
 }
 
 void WebSurface::replyFileChooser(int requestId, const QList<QUrl> &files)
@@ -711,6 +712,8 @@ void WebSurface::startEngine()
     m_activeTab = 0;
 
     qCInfo(PRAJNA_WEB) << "starting" << engine << "profile" << m_profileDir;
+    m_startClock.start();
+    m_loggedFrame = m_loggedLoad = false;
     m_process->start();
     ::close(childFd);
 }
@@ -919,9 +922,14 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
         if (hasActiveFocus())
             pushClipboard();
         restoreSession();
+        qCInfo(PRAJNA_WEB) << "engine ready in" << m_startClock.elapsed() << "ms";
         Q_EMIT runningChanged();
         break;
     case ZURF_EV_FRAME:
+        if (!m_loggedFrame) {
+            m_loggedFrame = true;
+            qCInfo(PRAJNA_WEB) << "first frame in" << m_startClock.elapsed() << "ms";
+        }
         if (p.size() >= 16)
             m_pendingDamage |= QRect(readI32(p, 0), readI32(p, 1), readI32(p, 2), readI32(p, 3));
         else
@@ -961,6 +969,7 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
     }
     case ZURF_EV_TAB: {
         const int id = readI32(p, 0);
+        const bool background = p.size() >= 12 && (readI32(p, 2) & ZURF_TAB_BACKGROUND);
         const bool hadPopup = isPopupOpen();
         if (indexOfTab(id) < 0) {
             Tab t;
@@ -977,7 +986,8 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
             }
             m_tabs.insert(at, t);
         }
-        m_activeTab = id;
+        if (!background)
+            m_activeTab = id;
         // Restored session complete: show the tab that was current.
         if (m_sessionExpected && m_tabs.size() >= m_sessionExpected) {
             m_sessionExpected = 0;
@@ -1010,6 +1020,10 @@ void WebSurface::handleEvent(quint8 op, const QByteArray &p)
             m_loading = loading;
             m_canGoBack = back;
             m_canGoForward = fwd;
+            if (!loading && !m_loggedLoad && m_ready) {
+                m_loggedLoad = true;
+                qCInfo(PRAJNA_WEB) << "page loaded in" << m_startClock.elapsed() << "ms";
+            }
             Q_EMIT loadStateChanged();
         }
         break;

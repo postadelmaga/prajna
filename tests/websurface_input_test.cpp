@@ -233,6 +233,17 @@ private Q_SLOTS:
         QTRY_COMPARE_WITH_TIMEOUT(count(), 3, 10000);
         QTRY_COMPARE_WITH_TIMEOUT(current(), 1, 5000);
         QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Two"), 5000);
+        // the other restored tab knows its address but is not loaded yet
+        auto tab = [&](int i) { return m_web->property("tabs").toList().at(i).toMap(); };
+        QTest::qWait(500);
+        QVERIFY(tab(2).value(QStringLiteral("title")).toString().isEmpty());
+        QVERIFY(tab(2).value(QStringLiteral("url")).toUrl().toString().contains(QLatin1String("Three")));
+        QCOMPARE(m_web->property("tabUrls").toStringList().size(), 3);
+        // ...until shown
+        QMetaObject::invokeMethod(m_web, "switchTab", Q_ARG(int, 2));
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Three"), 5000);
+        QMetaObject::invokeMethod(m_web, "switchTab", Q_ARG(int, 1));
+        QTRY_COMPARE_WITH_TIMEOUT(title(), QStringLiteral("Two"), 5000);
 
         // closing the current tab shows its neighbour
         QMetaObject::invokeMethod(m_web, "closeTab", Q_ARG(int, 1));

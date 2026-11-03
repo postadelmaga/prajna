@@ -43,6 +43,7 @@ typedef struct tab {
   int id;
   int opener_id;
   int flags; /* ZURF_TAB_* */
+  char *pending_url; /* background tab not loaded yet: load when shown */
   WebKitWebView *view;
   WPEView *wview;
 } tab_t;
@@ -621,6 +622,13 @@ static void tab_activate(tab_t *tab) {
   g_force_full = 1;
   if (tab) {
     tab_set_visible(tab, g_visible);
+    tab->flags &= ~ZURF_TAB_BACKGROUND;
+    if (tab->pending_url) {
+      char *u = tab->pending_url;
+      tab->pending_url = NULL;
+      webkit_web_view_load_uri(tab->view, u);
+      g_free(u);
+    }
     int32_t v[3] = {tab->id, tab->opener_id, tab->flags};
     send_event(ZURF_EV_TAB, v, sizeof(v)); /* "this tab is now active" */
     send_tab_str(ZURF_EV_TITLE, tab->id, webkit_web_view_get_title(tab->view));
@@ -630,6 +638,7 @@ static void tab_activate(tab_t *tab) {
 }
 
 static tab_t *tab_register(WebKitWebView *view, int opener_id, int flags);
+static void tab_free(gpointer p);
 static void tab_apply_transparency(tab_t *tab);
 static int g_transparent; /* see tab_apply_transparency */
 
@@ -914,7 +923,7 @@ static tab_t *tab_register(WebKitWebView *view, int opener_id, int flags) {
   tab->wview = webkit_web_view_get_wpe_view(view);
   /* The view owns `tab`: freed when the view finalizes, so late callbacks
    * holding `tab` as user data never touch freed memory. */
-  g_object_set_data_full(G_OBJECT(view), "prajna-tab-owner", tab, g_free);
+  g_object_set_data_full(G_OBJECT(view), "prajna-tab-owner", tab, tab_free);
   g_object_set_data(G_OBJECT(tab->wview), "prajna-tab", tab);
 
   g_signal_connect(view, "notify::title", G_CALLBACK(on_notify_title), tab);
@@ -941,23 +950,43 @@ static tab_t *tab_register(WebKitWebView *view, int opener_id, int flags) {
   view_apply_geometry(tab);
   wpe_view_map(tab->wview);
   wpe_view_set_visible(tab->wview, FALSE);
-  tab_activate(tab); /* new tabs (incl. popups) are born active */
+  if (flags & ZURF_TAB_BACKGROUND) {
+    int32_t v[3] = {tab->id, tab->opener_id, flags};
+    send_event(ZURF_EV_TAB, v, sizeof(v)); /* created, not shown */
+  } else {
+    tab_activate(tab); /* new tabs (incl. popups) are born active */
+  }
   return tab;
 }
 
-static tab_t *tab_new(const char *url) {
+static void tab_free(gpointer p) {
+  tab_t *tab = p;
+  g_free(tab->pending_url);
+  g_free(tab);
+}
+
+/* A new tab with `url`. In the background it only remembers the address
+ * and loads it when first shown: restoring a session then costs one page
+ * load, not one per tab competing for the same web process. */
+static tab_t *tab_new(const char *url, int background) {
   WebKitWebView *view = g_object_new(WEBKIT_TYPE_WEB_VIEW,
                                      "display", g_display,
                                      "web-context", g_context,
                                      "network-session", g_session,
                                      "settings", g_settings,
                                      NULL);
-  tab_t *tab = tab_register(view, 0, 0);
+  tab_t *tab = tab_register(view, 0, background ? ZURF_TAB_BACKGROUND : 0);
   if (!tab) {
     g_object_unref(view);
     return NULL;
   }
-  webkit_web_view_load_uri(view, url && url[0] ? url : "about:blank");
+  const char *u = url && url[0] ? url : "about:blank";
+  if (background) {
+    tab->pending_url = g_strdup(u);
+    send_tab_str(ZURF_EV_URL, tab->id, u);
+  } else {
+    webkit_web_view_load_uri(view, u);
+  }
   return tab;
 }
 
@@ -1668,7 +1697,13 @@ static void handle(uint8_t op, const uint8_t *pl, uint32_t len) {
     break;
   case ZURF_OP_TAB_NEW: {
     char *url = dup_str(pl, len);
-    tab_new(url);
+    tab_new(url, 0);
+    g_free(url);
+    break;
+  }
+  case ZURF_OP_TAB_NEW_BACKGROUND: {
+    char *url = dup_str(pl, len);
+    tab_new(url, 1);
     g_free(url);
     break;
   }
@@ -2005,7 +2040,7 @@ int main(int argc, char **argv) {
     set_feature("CrossOriginOpenerPolicy", FALSE);
   }
 
-  if (!tab_new(url && url[0] ? url : "about:blank")) {
+  if (!tab_new(url && url[0] ? url : "about:blank", 0)) {
     fprintf(stderr, "prajna-engine: first tab creation failed\n");
     return 1;
   }

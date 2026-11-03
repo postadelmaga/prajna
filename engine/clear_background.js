@@ -66,7 +66,13 @@
       pending[i].setAttribute(pending[i + 1], '');
     pending = [];
   }
-  let raf = 0, until = 0;
+  let raf = 0, until = 0, lastScan = -1e9, soonTimer = 0;
+  /* Nodes added since the last frame, handled together right before it is
+   * painted: the style recalculation the checks need is then the one the
+   * frame needs anyway, instead of an extra one per DOM change. */
+  let added = new Set(), addedRaf = 0;
+  /* onBase() answers during one pass (siblings share their ancestors) */
+  let baseMemo = null;
 
   /* Any CSS colour (rgb, color(srgb ...), oklch, ...) -> [r, g, b, a] with
    * 0-255 channels and 0-1 alpha, via a 1x1 canvas. Cached per string. */
@@ -185,14 +191,26 @@
 
   /* does `e` sit on the page background (no painted ancestor surface)? */
   function onBase(e) {
+    const seen = [];
+    let result = true;
     for (let p = e.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+      if (baseMemo && baseMemo.has(p)) {
+        result = baseMemo.get(p);
+        break;
+      }
+      seen.push(p);
       if (cleared(p))
         continue;
       const c = rgba(getComputedStyle(p).backgroundColor);
-      if (c && c[3] > 0.1)
-        return false;
+      if (c && c[3] > 0.1) {
+        result = false;
+        break;
+      }
     }
-    return true;
+    if (baseMemo)
+      for (const p of seen)
+        baseMemo.set(p, result);
+    return result;
   }
 
   function fullScan() {
@@ -212,6 +230,7 @@
     for (const c of document.body.children)
       visit(c, 0);
     flush();
+    lastScan = performance.now();
   }
 
   /* One pending catch-all scan at most (only the timer clears `timer`). */
@@ -234,13 +253,27 @@
     fullScan();
   }
 
-  /* Scan before each painted frame for the next `ms` milliseconds. */
+  /* A full scan once, shortly (several requests share it). */
+  function soon(ms) {
+    if (!soonTimer)
+      soonTimer = setTimeout(() => {
+        soonTimer = 0;
+        fullScan();
+      }, ms);
+  }
+
+  /* Scan before painted frames for the next `ms` milliseconds: every frame
+   * while the document is loading (small DOM, styles still arriving), then
+   * at most every 300 ms, which is plenty for restyles after hydration and
+   * stays cheap on long conversations. */
   function tick() {
     raf = 0;
     if (!on)
       return;
-    fullScan();
-    if (performance.now() < until || document.readyState !== 'complete')
+    const loading = document.readyState !== 'complete';
+    if (loading || performance.now() - lastScan >= 300)
+      fullScan();
+    if (performance.now() < until || loading)
       raf = requestAnimationFrame(tick);
   }
   function kick(ms) {
@@ -249,34 +282,54 @@
       raf = requestAnimationFrame(tick);
   }
 
-  /* New nodes: handled right away (before the next paint). */
+  /* New nodes: collected, handled before the next paint (processAdded). */
   function onMutations(list) {
+    if (!on)
+      return;
+    for (const m of list)
+      for (const n of m.addedNodes) {
+        if (n.nodeType !== 1)
+          continue;
+        if (n.tagName === 'STYLE' || n.tagName === 'LINK')
+          baseDirty = true;
+        added.add(n);
+      }
+    if (added.size && !addedRaf)
+      addedRaf = requestAnimationFrame(processAdded);
+    /* class/style driven changes on existing nodes: a rare catch-all */
+    later(1500);
+  }
+
+  function processAdded() {
+    addedRaf = 0;
+    const nodes = added;
+    added = new Set();
     if (!on)
       return;
     if (!base) {
       fullScan();
       return;
     }
-    let big = false;
-    for (const m of list)
-      for (const n of m.addedNodes) {
-        if (n.nodeType !== 1 || !n.isConnected)
-          continue;
-        if (n.tagName === 'STYLE' || n.tagName === 'LINK')
-          baseDirty = true;
-        if (onBase(n))
-          visit(n, 0);
-        if (CONTAINERS.has(n.tagName) && n.childElementCount > 2)
-          big = true;
-      }
-    flush();
+    /* New style sheets (CSS-in-JS adds them all the time) rarely change the
+     * page colour: check it once shortly, meanwhile keep the current one. */
     if (baseDirty)
-      later(50);
+      soon(250);
+    let big = false;
+    baseMemo = new Map();
+    for (const n of nodes) {
+      /* gone again, or inside another added node (visited with it) */
+      if (!n.isConnected || (n.parentElement && nodes.has(n.parentElement)))
+        continue;
+      if (onBase(n))
+        visit(n, 0);
+      if (!big && CONTAINERS.has(n.tagName) && n.childElementCount > 2)
+        big = true;
+    }
+    baseMemo = null;
+    flush();
     /* a new layout may be restyled by classes in the next frames */
     if (big)
-      kick(400);
-    /* class/style driven changes on existing nodes: a rare catch-all */
-    later(1500);
+      soon(250);
   }
 
   function watchRoot() {
@@ -332,6 +385,7 @@
     stop() {
       on = false;
       pending = [];
+      added = new Set();
       base = null;
       if (obs)
         obs.disconnect();
