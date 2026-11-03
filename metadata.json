@@ -18,7 +18,7 @@
         "Description": "AI chats in a light glass popup: ChatGPT, Claude, Gemini and more, with tabs",
         "Icon": "applications-internet",
         "Id": "io.github.postadelmaga.prajna",
-        "License": "GPL-2.0+",
+        "License": "GPL-3.0-only",
         "Name": "Prajna",
         "Website": "https://github.com/postadelmaga/prajna",
         "BugReportUrl": "https://github.com/postadelmaga/prajna/issues",

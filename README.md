@@ -154,6 +154,18 @@ JavaScript, input). `PRAJNA_WEB_ENGINE=/path/to/prajna-engine` makes the
 plugin use another engine binary; `PRAJNA_WEB_GPU=1` forces GPU rendering
 when running the engine by hand.
 
+## License
+
+Prajna is distributed under the **GNU General Public License v3.0**
+([LICENSE](LICENSE)). Source files carry SPDX headers
+(`GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL`, the usual
+KDE terms).
+
+Parts of the code come from ChatAI-Plasmoid, © 2024 Denys Madureira, which
+was published under the BSD 3-Clause license; its notice is kept in
+[LICENSES/BSD-3-Clause.txt](LICENSES/BSD-3-Clause.txt) as that license
+requires.
+
 ## Credits
 
 Original ChatAI-Plasmoid authors and contributors:
