@@ -12,6 +12,8 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 
+import "../lib/chatai"
+
 // Main plasmoid item that contains all the widget functionality
 PlasmoidItem {
     id: root
@@ -218,6 +220,11 @@ PlasmoidItem {
         onHeightChanged: saveSizeTimer.restart()
 
         spacing: 0
+
+        // Blur behind the popup on/off (Plasma's default is on).
+        PopupBlur {
+            blur: plasmoid.configuration.blurBehind
+        }
 
         // Add monitor for plasmoid location change
         Connections {

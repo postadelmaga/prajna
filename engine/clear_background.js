@@ -1,4 +1,4 @@
-/* Transparent page background (injected by chatai-webwpe).
+/* Transparent page background (injected by chatai-webwpe at document start).
  *
  * Makes the page's own background see-through so the Plasma popup (blurred
  * by KWin) shows behind the chat, while keeping everything that sits on top
@@ -7,15 +7,38 @@
  * Rule: the page's base colour is the opaque background of <body> or <html>.
  * Large containers (>= 8% of the viewport) painted with that same colour are
  * the "page background" and are cleared; anything with another colour is a
- * surface and stays. Small subtrees are skipped, so a scan touches only a few
- * dozen elements even on long conversations. */
+ * surface and stays.
+ *
+ * No flashes: <html>/<body> are cleared by the engine's user style sheet from
+ * the first frame; new containers are cleared in the MutationObserver
+ * callback and, while the page is loading or changing, again in
+ * requestAnimationFrame, which runs right before every frame is painted (a
+ * site's style sheet can colour existing nodes without any mutation). The
+ * engine style sheet is:
+ *   html:not([data-chatai-probe]), html:not([data-chatai-probe]) > body,
+ *   [data-chatai-clear], [data-chatai-clear-before]::before,
+ *   [data-chatai-clear-after]::after { background-color: transparent !important }
+ * data-chatai-probe briefly lifts the html/body rule to read their real
+ * colour; cleared elements remember theirs in data-chatai-clear. */
 (() => {
   if (window.__chataiClear) {
     window.__chataiClear.start();
     return;
   }
   const ATTR = 'data-chatai-clear';
-  let on = false, timer = 0, obs = null, rootObs = null;
+  /* pseudo-elements (e.g. a full-page ::before splash) get their own marks */
+  const PSEUDO = [['::before', 'data-chatai-clear-before'], ['::after', 'data-chatai-clear-after']];
+  const ALL = '[' + ATTR + '],[data-chatai-clear-before],[data-chatai-clear-after]';
+  const unmark = (e) => {
+    e.removeAttribute(ATTR);
+    for (const [, a] of PSEUDO)
+      e.removeAttribute(a);
+  };
+  const PROBE = 'data-chatai-probe';
+  const SKIP = new Set(['SPAN', 'A', 'B', 'I', 'EM', 'STRONG', 'CODE', 'BR', 'IMG', 'SVG', 'PATH',
+    'SCRIPT', 'STYLE', 'LINK', 'META', 'INPUT', 'TEXTAREA', 'BUTTON', 'LABEL', 'P', 'LI', 'TD', 'TH']);
+  let on = false, base = null, timer = 0, obs = null, rootObs = null;
+  let raf = 0, until = 0;
 
   /* Any CSS colour (rgb, color(srgb ...), oklch, ...) -> [r, g, b, a] with
    * 0-255 channels and 0-1 alpha, via a 1x1 canvas. Cached per string. */
@@ -49,81 +72,183 @@
   };
   const near = (a, b) => a && b && a[3] > 0.85 &&
     Math.abs(a[0] - b[0]) <= 8 && Math.abs(a[1] - b[1]) <= 8 && Math.abs(a[2] - b[2]) <= 8;
-  /* the colour an element had before we cleared it */
-  const bgOf = (e) => e.hasAttribute(ATTR) ? e.getAttribute(ATTR) : getComputedStyle(e).backgroundColor;
 
-  function base() {
-    for (const e of [document.body, document.documentElement]) {
-      if (!e)
-        continue;
-      const c = rgba(bgOf(e));
-      if (c && c[3] > 0.85)
-        return c;
+  /* real colour of <body>/<html>, with the engine rule lifted for the read */
+  function readBase() {
+    const root = document.documentElement;
+    if (!root)
+      return null;
+    root.setAttribute(PROBE, '');
+    let found = null;
+    for (const e of [document.body, root]) {
+      const c = e && rgba(getComputedStyle(e).backgroundColor);
+      if (c && c[3] > 0.85) {
+        found = c;
+        break;
+      }
     }
-    return null;
+    root.removeAttribute(PROBE);
+    return found;
   }
 
-  function mark(e) {
-    if (!e.hasAttribute(ATTR))
-      e.setAttribute(ATTR, getComputedStyle(e).backgroundColor);
+  let minArea = 0;
+  /* Clear `e` if it is a large base-coloured container, then descend into
+   * its large children (small subtrees can't hold page background). */
+  function visit(e, depth) {
+    if (e.nodeType !== 1 || SKIP.has(e.tagName.toUpperCase()))
+      return;
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none')
+      return;
+    if (cs.display !== 'contents') {
+      const r = e.getBoundingClientRect();
+      if (r.width * r.height < minArea)
+        return;
+      if (!e.hasAttribute(ATTR) && near(rgba(cs.backgroundColor), base))
+        e.setAttribute(ATTR, '');
+      for (const [ps, a] of PSEUDO) {
+        if (e.hasAttribute(a))
+          continue;
+        const pcs = getComputedStyle(e, ps);
+        if (pcs.content !== 'none' && near(rgba(pcs.backgroundColor), base))
+          e.setAttribute(a, '');
+      }
+    }
+    if (depth < 30)
+      for (const c of e.children)
+        visit(c, depth + 1);
   }
 
-  function scan() {
-    timer = 0;
+  /* Cheap check for freshly added nodes (e.g. every streamed token): colour
+   * first, so layout is only queried for base-coloured candidates; bounded
+   * depth. Returns true if a container that might hold page background was
+   * added, so the next frames get full scans. */
+  const CONTAINERS = new Set(['DIV', 'MAIN', 'SECTION', 'ARTICLE', 'ASIDE', 'NAV', 'HEADER', 'FOOTER', 'DIALOG']);
+  function visitAdded(e, depth) {
+    if (e.nodeType !== 1 || SKIP.has(e.tagName.toUpperCase()))
+      return false;
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none')
+      return false;
+    const container = CONTAINERS.has(e.tagName.toUpperCase());
+    let hit = near(rgba(cs.backgroundColor), base);
+    if (container)
+      for (const [ps, a] of PSEUDO) {
+        const pcs = getComputedStyle(e, ps);
+        if (pcs.content !== 'none' && near(rgba(pcs.backgroundColor), base))
+          hit = true;
+      }
+    if (hit)
+      visit(e, 0); /* size check + marks */
+    let big = container && e.childElementCount > 2;
+    if (depth < 6)
+      for (const c of e.children)
+        big = visitAdded(c, depth + 1) || big;
+    return big;
+  }
+
+  function fullScan() {
     if (!on || !document.body)
       return;
-    const b = base();
-    if (!b)
-      return; /* already transparent */
-    mark(document.documentElement);
-    mark(document.body);
-    const min = innerWidth * innerHeight * 0.08;
-    const walk = (e, depth) => {
-      for (const c of e.children) {
-        const cs = getComputedStyle(c);
-        if (cs.display === 'contents') {
-          walk(c, depth + 1);
-          continue;
-        }
-        const r = c.getBoundingClientRect();
-        if (r.width * r.height < min)
-          continue;
-        if (near(rgba(bgOf(c)), b))
-          mark(c);
-        if (depth < 30)
-          walk(c, depth + 1);
-      }
-    };
-    walk(document.body, 0);
+    base = readBase();
+    if (!base)
+      return;
+    minArea = innerWidth * innerHeight * 0.08;
+    for (const c of document.body.children)
+      visit(c, 0);
   }
 
-  const schedule = () => {
-    if (on && !timer)
-      timer = setTimeout(scan, 600);
-  };
-  function reset() {
-    for (const e of document.querySelectorAll('[' + ATTR + ']'))
-      e.removeAttribute(ATTR);
+  /* One pending catch-all scan at most (only the timer clears `timer`). */
+  function later(ms) {
+    if (!timer)
+      timer = setTimeout(() => {
+        timer = 0;
+        fullScan();
+      }, ms);
   }
-  /* theme switch: the remembered colours are stale */
-  const rescan = () => {
-    reset();
-    schedule();
-  };
+
+  /* Theme switch: forget what was cleared and redo it in the same task, so
+   * no frame shows the page half-cleared. */
+  function rescan() {
+    if (!on)
+      return;
+    for (const e of document.querySelectorAll(ALL))
+      unmark(e);
+    fullScan();
+  }
+
+  /* Scan before each painted frame for the next `ms` milliseconds. */
+  function tick() {
+    raf = 0;
+    if (!on)
+      return;
+    fullScan();
+    if (performance.now() < until || document.readyState !== 'complete')
+      raf = requestAnimationFrame(tick);
+  }
+  function kick(ms) {
+    until = Math.max(until, performance.now() + ms);
+    if (on && !raf)
+      raf = requestAnimationFrame(tick);
+  }
+
+  /* New nodes: handled right away (before the next paint). */
+  function onMutations(list) {
+    if (!on)
+      return;
+    if (!base) {
+      fullScan();
+      return;
+    }
+    minArea = innerWidth * innerHeight * 0.08;
+    let big = false;
+    for (const m of list)
+      for (const n of m.addedNodes)
+        if (n.nodeType === 1)
+          big = visitAdded(n, 0) || big;
+    /* a new layout may be restyled by classes in the next frames */
+    if (big)
+      kick(400);
+    /* class/style driven changes on existing nodes: a rare catch-all */
+    later(1500);
+  }
+
+  function watchRoot() {
+    if (rootObs || !document.body)
+      return;
+    rootObs = new MutationObserver(rescan);
+    for (const e of [document.documentElement, document.body])
+      rootObs.observe(e, {attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-mode']});
+  }
 
   window.__chataiClear = {
     start() {
       if (on)
         return;
       on = true;
-      obs = new MutationObserver(schedule);
-      obs.observe(document.documentElement, {childList: true, subtree: true});
-      rootObs = new MutationObserver(rescan);
-      for (const e of [document.documentElement, document.body].filter(Boolean))
-        rootObs.observe(e, {attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-mode']});
-      addEventListener('resize', schedule);
+      obs = new MutationObserver((list) => {
+        watchRoot();
+        onMutations(list);
+      });
+      obs.observe(document, {childList: true, subtree: true});
+      watchRoot();
+      /* style sheets arriving change colours without DOM mutations */
+      document.addEventListener('load', (ev) => {
+        if (ev.target && ev.target.tagName === 'LINK')
+          fullScan();
+      }, true);
+      document.addEventListener('DOMContentLoaded', fullScan);
+      addEventListener('load', () => {
+        fullScan();
+        kick(3000); /* hydration usually restyles right after load */
+      });
+      addEventListener('pageshow', () => kick(1500));
+      addEventListener('resize', () => {
+        later(300);
+      });
       matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rescan);
-      scan();
+      fullScan();
+      kick(1500);
     },
     stop() {
       on = false;
@@ -131,7 +256,9 @@
         obs.disconnect();
       if (rootObs)
         rootObs.disconnect();
-      reset();
+      rootObs = null;
+      for (const e of document.querySelectorAll(ALL))
+        unmark(e);
     },
   };
   window.__chataiClear.start();

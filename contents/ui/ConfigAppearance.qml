@@ -13,6 +13,8 @@ import org.kde.kirigami 2.20 as Kirigami
 import org.kde.iconthemes as KIconThemes
 import org.kde.kcmutils as KCM
 
+import "../lib/chatai"
+
 KCM.SimpleKCM {
     // Icon mode constants (must match CompactRepresentation.qml)
     readonly property int iconModeFavicon: 0
@@ -85,8 +87,26 @@ KCM.SimpleKCM {
             Layout.fillWidth: true
         }
 
+        PopupBlur {
+            id: blurInfo
+            visible: false
+        }
+
         QQC2.CheckBox {
             Kirigami.FormData.label: i18n("Look:")
+            text: i18n("Blur behind the popup")
+            checked: plasmoid.configuration.blurBehind
+            onToggled: plasmoid.configuration.blurBehind = checked
+        }
+
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            type: Kirigami.MessageType.Warning
+            visible: !blurInfo.available
+            text: i18n("The Blur desktop effect is off: enable it in System Settings → Window Management → Desktop Effects.")
+        }
+
+        QQC2.CheckBox {
             text: i18n("Transparent page background")
             checked: plasmoid.configuration.transparentBackground
             onToggled: plasmoid.configuration.transparentBackground = checked

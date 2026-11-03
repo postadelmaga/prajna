@@ -233,6 +233,10 @@
       <label>Stop the web engine after the popup has been closed for this many minutes (0 = never)</label>
       <default>15</default>
     </entry>
+    <entry name="blurBehind" type="Bool">
+      <label>Blur what is behind the popup (KWin blur effect)</label>
+      <default>true</default>
+    </entry>
     <entry name="transparentBackground" type="Bool">
       <label>See-through page background (the blurred popup shows behind the chat)</label>
       <default>true</default>
