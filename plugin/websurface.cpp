@@ -765,7 +765,8 @@ void WebSurface::stopEngine(bool graceful)
     for (QJSValue cb : callbacks)
         cb.call({QJSValue(QString())});
 
-    // Remember the open tabs: the next start reopens them.
+    // Remember the open tabs: the next start reopens them. (With a sign-in
+    // popup in front, `m_url` is the popup's: the session keeps the page.)
     if (m_tabs.size() > 1) {
         m_session.clear();
         m_sessionCurrent = 0;
@@ -776,8 +777,8 @@ void WebSurface::stopEngine(bool graceful)
                 m_sessionCurrent = m_session.size();
             m_session << QString::fromUtf8(t.url.toEncoded());
         }
-        if (m_session.size() < 2)
-            m_session.clear();
+        if (m_sessionCurrent >= m_session.size())
+            m_sessionCurrent = 0;
     }
     const bool hadPopup = isPopupOpen();
     const bool hadTabs = !m_tabs.isEmpty();

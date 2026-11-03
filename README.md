@@ -24,7 +24,76 @@ Prajna started as a fork of
 Madureira and Bruno Gonçalves, and has since been rewritten around its own
 web engine.
 
-## Lightweight web engine
+## Install
+
+Requirements: Plasma 6, Qt ≥ 6.6, KDE Frameworks/ECM 6, `wpewebkit` ≥ 2.48
+(with the WPE Platform API), `libxkbcommon`, CMake and a C/C++ compiler.
+
+```sh
+# Arch / CachyOS / Manjaro
+sudo pacman -S --needed wpewebkit extra-cmake-modules cmake base-devel
+
+git clone https://github.com/postadelmaga/prajna.git
+cd prajna
+./install.sh                 # per user, into ~/.local (no root needed)
+# or system-wide:
+cmake -B build -DCMAKE_INSTALL_PREFIX=/usr && cmake --build build && sudo cmake --install build
+```
+
+Then right-click the panel → *Add or Manage Widgets…* → **Prajna**.
+After an upgrade, restart Plasma: `systemctl --user restart plasma-plasmashell`.
+
+The engine and the QML plugin are installed **inside** the plasmoid package
+(`contents/lib/prajna/`), so no QML import path setup is needed. Prajna has
+compiled parts, so it is not installable from *Get New Widgets* alone.
+
+## Using it
+
+Click the panel icon (or give it a shortcut in the widget settings) and pick
+a site in the top bar. Log in as usual: cookies stay in the widget's profile.
+
+| Keys | Action |
+|---|---|
+| Ctrl+T | New tab with the start page |
+| Ctrl+W | Close the tab |
+| Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PgDown / Ctrl+PgUp | Next / previous tab |
+| Ctrl+F | Find in page |
+
+Middle-click closes a tab; the right-click menu has *Open Link in New Tab*.
+Right-clicking the panel icon offers *Go to Start Page*, *Reload Page* and
+*Keep Open* even when the top bar is hidden.
+
+## Settings
+
+- **Sites**: start page, which sites appear in the top bar, your own sites,
+  where links to new windows open (new tab or web browser), reopening the
+  tabs of the last session.
+- **Appearance**: transparent page background, blur, the veil (how much of
+  the theme colour covers the desktop) and grain; panel icon; top bar
+  (always, on hover at the top edge, never) and its buttons.
+- **Privacy**: what websites may do (notifications, microphone, camera,
+  screen, location, clipboard, windows, autoplay), downloads folder, profile
+  name — give each widget its own profile to keep separate accounts.
+- **Engine**: load at login, free memory after N minutes closed, integrated
+  GPU or CPU, frame rate, low-memory JavaScript, memory limit, user agent,
+  spatial navigation.
+
+## Coming from ChatAI-Plasmoid
+
+Prajna installs as a new widget (`io.github.postadelmaga.prajna`). To keep an
+existing ChatAI-Plasmoid widget with its settings and logins:
+
+```sh
+systemctl --user stop plasma-plasmashell
+sed -i 's/^plugin=ChatAI-Plasmoid$/plugin=io.github.postadelmaga.prajna/' \
+    ~/.config/plasma-org.kde.plasma.desktop-appletsrc
+# only for the WPE edition of ChatAI-Plasmoid (the Qt WebEngine one stored
+# its logins elsewhere; just log in again):
+mkdir -p ~/.local/share/prajna && mv ~/.local/share/chatai-plasmoid/chat-ai ~/.local/share/prajna/default
+systemctl --user start plasma-plasmashell
+```
+
+## How it works
 
 Prajna does **not** use Qt WebEngine. Loading Chromium inside
 `plasmashell` costs memory even while the popup is closed, and a renderer
@@ -51,29 +120,39 @@ plasmashell ─ Prajna QML ─ WebSurface (QQuickItem, ~1 MB plugin)
   never used and stays asleep; nouveau is always skipped. Unchecking
   "Use the integrated GPU" draws with Mesa's software rasterizer instead
   (about twice the memory).
+- The see-through page is done inside the engine: a small script, injected
+  before the site's own, clears the elements painted with the page's
+  background colour and leaves every other surface (messages, menus, the
+  text box) as the site draws them.
 - Supported: file uploads, downloads, notifications, microphone/camera
   permissions, clipboard both ways (including pasting images), find in page,
-  context menu, login popups (OAuth), HiDPI, IME/dead keys.
+  context menu, tabs and login popups (OAuth), HiDPI, IME/dead keys.
 - Not supported: printing/saving pages as PDF (WPE has no print backend).
 
-### Build and install
+## Troubleshooting
 
-Requirements: Qt ≥ 6.6, KDE Frameworks/ECM 6, Plasma 6, `wpewebkit` ≥ 2.48
-(the WPE Platform API), `libxkbcommon`, CMake, a C/C++ compiler.
+- **No blur**: the *Blur* desktop effect must be on (System Settings →
+  Desktop Effects); the Appearance page warns when it is off. Blur only
+  applies with the transparent page background.
+- **"The web engine could not start"**: check that `wpewebkit` is installed
+  and see the log: `journalctl --user -u plasma-plasmashell | grep -i prajna`.
+- **Rendering problems on the GPU**: uncheck *Use the integrated GPU*
+  (Engine page) to draw on the CPU.
+- A site misbehaves with the transparent background: turn it off (Appearance)
+  and please open an issue with the site's address.
+
+## Development
 
 ```sh
-# Arch/CachyOS: pacman -S wpewebkit extra-cmake-modules cmake
-./install.sh                 # per-user, into ~/.local (no root needed)
-# or system-wide:
-cmake -B build -DCMAKE_INSTALL_PREFIX=/usr && cmake --build build && sudo cmake --install build
+cmake -B build -DBUILD_TESTING=ON && cmake --build build && ctest --test-dir build
 ```
 
-The engine and the QML plugin are installed **inside** the plasmoid package
-(`contents/lib/prajna/`), so no QML import path setup is required. After an
-upgrade restart Plasma (`systemctl --user restart plasma-plasmashell`).
-
-Tests (optional): `cmake -B build -DBUILD_TESTING=ON && cmake --build build && ctest --test-dir build`.
-`engine/tools/engine_probe.py` drives the engine without Qt (screenshots, JS, input).
+The test drives the real engine on local pages (typing, input methods,
+frames, tabs, engine restarts); no network needed.
+`engine/tools/engine_probe.py` drives the engine without Qt (screenshots,
+JavaScript, input). `PRAJNA_WEB_ENGINE=/path/to/prajna-engine` makes the
+plugin use another engine binary; `PRAJNA_WEB_GPU=1` forces GPU rendering
+when running the engine by hand.
 
 ## Credits
 
