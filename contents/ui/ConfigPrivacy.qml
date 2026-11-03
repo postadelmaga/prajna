@@ -30,8 +30,8 @@ KCM.SimpleKCM {
     property string cfg_downloadPath
     property string cfg_webEngineProfileName
 
-    readonly property string dataRoot: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, "") + "/chatai-plasmoid/"
-    readonly property string profileName: cfg_webEngineProfileName.trim() || "chat-ai"
+    readonly property string dataRoot: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, "") + "/prajna/"
+    readonly property string profileName: cfg_webEngineProfileName.trim() || "default"
     readonly property string downloadFolder: (cfg_downloadPath || StandardPaths.writableLocation(StandardPaths.DownloadLocation).toString()).replace(/^file:\/\//, "")
 
     component Hint: QQC2.Label {
@@ -125,9 +125,9 @@ KCM.SimpleKCM {
 
             QQC2.TextField {
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 10
-                placeholderText: "chat-ai"
+                placeholderText: "default"
                 text: page.cfg_webEngineProfileName
-                onEditingFinished: page.cfg_webEngineProfileName = text.trim() || "chat-ai"
+                onEditingFinished: page.cfg_webEngineProfileName = text.trim() || "default"
             }
             QQC2.Button {
                 icon.name: "folder-open"

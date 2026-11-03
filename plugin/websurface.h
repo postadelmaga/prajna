@@ -23,7 +23,7 @@ class QTimer;
 
 /*
  * WebSurface — a QQuickItem that shows a web page rendered by an
- * out-of-process engine (chatai-webwpe, WPE WebKit) speaking the Zurf engine
+ * out-of-process engine (prajna-engine, WPE WebKit) speaking the Zurf engine
  * protocol. Nothing web-related is loaded into the host process: the item
  * only maps a shared-memory frame slot, uploads it as a texture and forwards
  * input over a socket.

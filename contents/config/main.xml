@@ -210,8 +210,8 @@
       <default></default>
     </entry>
     <entry name="webEngineProfileName" type="String">
-      <label>Profile name (cookies, logins and cache live in ~/.local/share/chatai-plasmoid/NAME)</label>
-      <default>chat-ai</default>
+      <label>Profile name (cookies, logins and cache live in ~/.local/share/prajna/NAME)</label>
+      <default>default</default>
     </entry>
   </group>
 </kcfg>

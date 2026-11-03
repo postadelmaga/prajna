@@ -10,7 +10,7 @@ import QtQuick
 
 import org.kde.plasma.extras as PlasmaExtras
 
-import "../lib/chatai"
+import "../lib/prajna"
 
 // WPE has no native context menu: the engine reports what was clicked and
 // we draw a Plasma menu for it.

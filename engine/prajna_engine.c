@@ -1,4 +1,4 @@
-/* chatai_webwpe.c — out-of-process WPE WebKit engine for the ChatAI plasmoid.
+/* prajna_engine.c — out-of-process WPE WebKit engine for the Prajna plasmoid.
  *
  * Speaks the Zurf engine protocol (engine_proto.h) on fd 3 and publishes
  * frames into a double-buffered BGRA shm slot. Derived from Zurf's
@@ -572,7 +572,7 @@ static GObject *pending_take(int id) {
 /* tabs                                                                     */
 
 static tab_t *tab_of_wview(WPEView *v) {
-  return v ? g_object_get_data(G_OBJECT(v), "chatai-tab") : NULL;
+  return v ? g_object_get_data(G_OBJECT(v), "prajna-tab") : NULL;
 }
 
 static tab_t *tab_find(int id) {
@@ -914,8 +914,8 @@ static tab_t *tab_register(WebKitWebView *view, int opener_id, int flags) {
   tab->wview = webkit_web_view_get_wpe_view(view);
   /* The view owns `tab`: freed when the view finalizes, so late callbacks
    * holding `tab` as user data never touch freed memory. */
-  g_object_set_data_full(G_OBJECT(view), "chatai-tab-owner", tab, g_free);
-  g_object_set_data(G_OBJECT(tab->wview), "chatai-tab", tab);
+  g_object_set_data_full(G_OBJECT(view), "prajna-tab-owner", tab, g_free);
+  g_object_set_data(G_OBJECT(tab->wview), "prajna-tab", tab);
 
   g_signal_connect(view, "notify::title", G_CALLBACK(on_notify_title), tab);
   g_signal_connect(view, "notify::uri", G_CALLBACK(on_notify_uri), tab);
@@ -976,7 +976,7 @@ static void tab_close(int id) {
       tab_activate(next);
     }
     WebKitWebView *view = tab->view;
-    g_object_set_data(G_OBJECT(tab->wview), "chatai-tab", NULL);
+    g_object_set_data(G_OBJECT(tab->wview), "prajna-tab", NULL);
     g_signal_handlers_disconnect_by_data(view, tab);
     g_signal_handlers_disconnect_by_data(webkit_web_view_get_find_controller(view), tab);
     int32_t v = id;
@@ -1443,11 +1443,11 @@ static void tab_apply_transparency(tab_t *tab) {
   webkit_web_view_set_background_color(view, &bg);
   if (g_transparent) {
     WebKitUserStyleSheet *css = webkit_user_style_sheet_new(
-        "html:not([data-chatai-probe]),html:not([data-chatai-probe])>body,"
-        "[data-chatai-clear],[data-chatai-clear-before]::before,[data-chatai-clear-after]::after,"
-        "[data-chatai-clear-i]:not(:hover):not(:active):not(:focus-visible)"
+        "html:not([data-prajna-probe]),html:not([data-prajna-probe])>body,"
+        "[data-prajna-clear],[data-prajna-clear-before]::before,[data-prajna-clear-after]::after,"
+        "[data-prajna-clear-i]:not(:hover):not(:active):not(:focus-visible)"
         "{background-color:transparent!important}"
-        "[data-chatai-clear-img]{background-image:none!important}",
+        "[data-prajna-clear-img]{background-image:none!important}",
         WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER, NULL, NULL);
     webkit_user_content_manager_add_style_sheet(ucm, css);
     webkit_user_style_sheet_unref(css);
@@ -1459,7 +1459,7 @@ static void tab_apply_transparency(tab_t *tab) {
   }
   /* the page already shown: start/stop in place, no reload */
   webkit_web_view_evaluate_javascript(view,
-      g_transparent ? CLEAR_BACKGROUND_JS : "window.__chataiClear && window.__chataiClear.stop()",
+      g_transparent ? CLEAR_BACKGROUND_JS : "window.__prajnaClear && window.__prajnaClear.stop()",
       -1, NULL, NULL, NULL, NULL, NULL);
 }
 
@@ -1852,7 +1852,7 @@ static void configure_gpu(int use_gpu) {
   }
   char *node, *pci;
   if (!integrated_gpu(&node, &pci)) {
-    fprintf(stderr, "chatai-webwpe: no integrated GPU found, using software rendering\n");
+    fprintf(stderr, "prajna-engine: no integrated GPU found, using software rendering\n");
     configure_gpu(0);
     return;
   }
@@ -1861,7 +1861,7 @@ static void configure_gpu(int use_gpu) {
   g_setenv("WEBKIT_WEB_RENDER_DEVICE_FILE", node, TRUE);
   if (pci)
     g_setenv("DRI_PRIME", pci, TRUE);
-  fprintf(stderr, "chatai-webwpe: GPU rendering on %s (%s)\n", node, pci ? pci : "?");
+  fprintf(stderr, "prajna-engine: GPU rendering on %s (%s)\n", node, pci ? pci : "?");
   g_free(node);
   g_free(pci);
 }
@@ -1898,7 +1898,7 @@ int main(int argc, char **argv) {
     g_frame_interval_us = 1000000 / atoi(fps_s);
   g_frame_events = arg_flag(argc, argv, "--zurf-frame-events");
   if (!shm_path || !cache_dir) {
-    fprintf(stderr, "chatai-webwpe: missing --zurf-shm / --zurf-cache\n");
+    fprintf(stderr, "prajna-engine: missing --zurf-shm / --zurf-cache\n");
     return 2;
   }
   if (fd_s)
@@ -1912,19 +1912,19 @@ int main(int argc, char **argv) {
 
   int shm_fd = open(shm_path, O_RDWR | O_CLOEXEC);
   if (shm_fd < 0) {
-    fprintf(stderr, "chatai-webwpe: cannot open %s\n", shm_path);
+    fprintf(stderr, "prajna-engine: cannot open %s\n", shm_path);
     return 2;
   }
   void *map = mmap(NULL, ZURF_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   close(shm_fd);
   if (map == MAP_FAILED) {
-    fprintf(stderr, "chatai-webwpe: mmap failed\n");
+    fprintf(stderr, "prajna-engine: mmap failed\n");
     return 2;
   }
   g_shm = map;
   g_shm_pixels = (uint8_t *)map + sizeof(zurf_shm_header);
 
-  configure_gpu(arg_flag(argc, argv, "--gpu") || truthy(g_getenv("CHATAI_WEB_GPU")));
+  configure_gpu(arg_flag(argc, argv, "--gpu") || truthy(g_getenv("PRAJNA_WEB_GPU")));
   /* JavaScript interpreter only: chat sites' JIT tiers keep profiling and
    * compiler data in the malloc heap (measured on a logged-in ChatGPT:
    * ~150-200 MB less), at the cost of slower scripts. Inherited by the web
@@ -1938,7 +1938,7 @@ int main(int argc, char **argv) {
   g_display = g_object_new(Z_TYPE_DISPLAY, NULL);
   GError *err = NULL;
   if (!wpe_display_connect(g_display, &err)) {
-    fprintf(stderr, "chatai-webwpe: display connect failed: %s\n", err ? err->message : "?");
+    fprintf(stderr, "prajna-engine: display connect failed: %s\n", err ? err->message : "?");
     return 1;
   }
   wpe_display_set_primary(g_display);
@@ -2006,7 +2006,7 @@ int main(int argc, char **argv) {
   }
 
   if (!tab_new(url && url[0] ? url : "about:blank")) {
-    fprintf(stderr, "chatai-webwpe: first tab creation failed\n");
+    fprintf(stderr, "prajna-engine: first tab creation failed\n");
     return 1;
   }
 

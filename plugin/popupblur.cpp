@@ -13,7 +13,7 @@
 #include <QRegion>
 #include <QTimer>
 
-Q_LOGGING_CATEGORY(lcBlur, "chatai.blur", QtInfoMsg)
+Q_LOGGING_CATEGORY(lcBlur, "prajna.blur", QtInfoMsg)
 
 PopupBlur::PopupBlur(QQuickItem *parent)
     : QQuickItem(parent)

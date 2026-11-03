@@ -40,7 +40,7 @@
 #include <unistd.h>
 #include <xkbcommon/xkbcommon.h>
 
-Q_LOGGING_CATEGORY(CHATAI_WEB, "chatai.web", QtInfoMsg)
+Q_LOGGING_CATEGORY(PRAJNA_WEB, "prajna.web", QtInfoMsg)
 
 namespace
 {
@@ -177,7 +177,7 @@ WebSurface::WebSurface(QQuickItem *parent)
     setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton | Qt::MiddleButton | Qt::BackButton | Qt::ForwardButton);
     setClip(true);
 
-    m_profileDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/chatai-plasmoid/default");
+    m_profileDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/prajna/default");
     m_downloadDir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
 
     m_restartTimer = new QTimer(this);
@@ -342,7 +342,7 @@ void WebSurface::setLastError(const QString &error)
         return;
     m_lastError = error;
     if (!error.isEmpty())
-        qCWarning(CHATAI_WEB) << error;
+        qCWarning(PRAJNA_WEB) << error;
     Q_EMIT lastErrorChanged();
 }
 
@@ -570,16 +570,16 @@ QString WebSurface::resolvedEnginePath() const
     QStringList candidates;
     if (!m_enginePath.isEmpty())
         candidates << m_enginePath;
-    const QString env = qEnvironmentVariable("CHATAI_WEB_ENGINE");
+    const QString env = qEnvironmentVariable("PRAJNA_WEB_ENGINE");
     if (!env.isEmpty())
         candidates << env;
     // Installed layout: the engine sits next to this plugin inside the
-    // plasmoid package (contents/lib/chatai/).
+    // plasmoid package (contents/lib/prajna/).
     Dl_info info{};
     if (dladdr(reinterpret_cast<void *>(&cursorForCss), &info) && info.dli_fname)
-        candidates << QFileInfo(QFile::decodeName(info.dli_fname)).absolutePath() + QStringLiteral("/chatai-webwpe");
-#ifdef CHATAI_ENGINE_BUILD_PATH
-    candidates << QStringLiteral(CHATAI_ENGINE_BUILD_PATH);
+        candidates << QFileInfo(QFile::decodeName(info.dli_fname)).absolutePath() + QStringLiteral("/prajna-engine");
+#ifdef PRAJNA_ENGINE_BUILD_PATH
+    candidates << QStringLiteral(PRAJNA_ENGINE_BUILD_PATH);
 #endif
     for (const QString &c : std::as_const(candidates)) {
         const QFileInfo fi(c);
@@ -604,7 +604,7 @@ void WebSurface::startEngine()
 
     const QString engine = resolvedEnginePath();
     if (engine.isEmpty()) {
-        setLastError(QStringLiteral("chatai-webwpe engine not found (set CHATAI_WEB_ENGINE or reinstall the plasmoid)"));
+        setLastError(QStringLiteral("prajna-engine engine not found (set PRAJNA_WEB_ENGINE or reinstall the plasmoid)"));
         return;
     }
 
@@ -613,7 +613,7 @@ void WebSurface::startEngine()
     if (runtimeDir.isEmpty())
         runtimeDir = QStringLiteral("/dev/shm");
     static int s_counter = 0;
-    m_shmPath = QStringLiteral("%1/chatai-web-%2-%3.shm").arg(runtimeDir).arg(QCoreApplication::applicationPid()).arg(++s_counter);
+    m_shmPath = QStringLiteral("%1/prajna-%2-%3.shm").arg(runtimeDir).arg(QCoreApplication::applicationPid()).arg(++s_counter);
     const QByteArray shmPathC = QFile::encodeName(m_shmPath);
     int shmFd = ::open(shmPathC.constData(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
     if (shmFd < 0 || ::ftruncate(shmFd, ZURF_SHM_SIZE) != 0) {
@@ -710,7 +710,7 @@ void WebSurface::startEngine()
     m_tabs.clear();
     m_activeTab = 0;
 
-    qCInfo(CHATAI_WEB) << "starting" << engine << "profile" << m_profileDir;
+    qCInfo(PRAJNA_WEB) << "starting" << engine << "profile" << m_profileDir;
     m_process->start();
     ::close(childFd);
 }
@@ -806,7 +806,7 @@ void WebSurface::onEngineFinished()
         return;
     if (crashed && m_crashCount < kMaxCrashRestarts) {
         ++m_crashCount;
-        qCWarning(CHATAI_WEB) << "web engine exited (code" << code << "), restarting, attempt" << m_crashCount;
+        qCWarning(PRAJNA_WEB) << "web engine exited (code" << code << "), restarting, attempt" << m_crashCount;
         Q_EMIT engineCrashed();
         m_restartTimer->start(500 * m_crashCount);
     } else if (crashed) {
@@ -881,7 +881,7 @@ void WebSurface::onReadable()
         zurf_msg_header h;
         memcpy(&h, m_in.constData() + off, sizeof(h));
         if (h.len > ZURF_MSG_MAX) {
-            qCWarning(CHATAI_WEB) << "protocol error: oversized message" << h.len;
+            qCWarning(PRAJNA_WEB) << "protocol error: oversized message" << h.len;
             m_in.clear();
             restartEngine();
             return;

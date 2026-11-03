@@ -1,7 +1,7 @@
 [Global]
 IconName=applications-internet
-Comment=ChatAI
-Name=ChatAI
+Comment=Prajna
+Name=Prajna
 
 [Event/notification]
 Name=Website notification

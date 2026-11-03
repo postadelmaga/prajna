@@ -16,12 +16,12 @@ import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 import org.kde.notification
 
-import "../lib/chatai"
+import "../lib/prajna"
 
 import "."
 
 // The web area. Rendering happens in a separate WPE WebKit process
-// (chatai-webwpe); WebSurface only shows its frames and forwards input.
+// (prajna-engine); WebSurface only shows its frames and forwards input.
 Item {
     id: webViewRoot
 
@@ -31,7 +31,7 @@ Item {
     // True while a native dialog is up: the popup must not auto-close.
     readonly property bool dialogOpen: fileDialog.visible
 
-    readonly property string effectiveProfileName: plasmoid.configuration.webEngineProfileName && plasmoid.configuration.webEngineProfileName.length ? plasmoid.configuration.webEngineProfileName : "chat-ai"
+    readonly property string effectiveProfileName: plasmoid.configuration.webEngineProfileName && plasmoid.configuration.webEngineProfileName.length ? plasmoid.configuration.webEngineProfileName : "default"
     readonly property string downloadDirectory: {
         const p = plasmoid.configuration.downloadPath ? plasmoid.configuration.downloadPath.toString() : "";
         return p.length ? p.replace(/^file:\/\//, '') : StandardPaths.writableLocation(StandardPaths.DownloadLocation).toString().replace(/^file:\/\//, '');
@@ -75,7 +75,7 @@ Item {
     }
 
     function showNotification(title, message, icon = "dialog-information") {
-        webNotification.title = title || i18n("ChatAI");
+        webNotification.title = title || i18n("Prajna");
         webNotification.text = message;
         webNotification.iconName = icon;
         webNotification.sendEvent();
@@ -160,9 +160,9 @@ Item {
 
     Notification {
         id: webNotification
-        componentName: "chatai_plasmoid"
+        componentName: "prajna"
         eventId: "notification"
-        title: i18n("ChatAI")
+        title: i18n("Prajna")
         iconName: "dialog-information"
     }
 
@@ -173,7 +173,7 @@ Item {
 
     // Tabs. The page lets these through (WebSurface::isHostShortcut).
     Shortcut {
-        sequence: StandardKey.AddTab
+        sequences: [StandardKey.AddTab]
         onActivated: webViewRoot.newTab()
     }
     Shortcut {
@@ -234,7 +234,7 @@ Item {
         anchors.topMargin: tabStrip.visible ? tabStrip.height + Kirigami.Units.smallSpacing : 0
 
         url: plasmoid.configuration.url
-        profileDirectory: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, '') + "/chatai-plasmoid/" + webViewRoot.effectiveProfileName
+        profileDirectory: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, '') + "/prajna/" + webViewRoot.effectiveProfileName
         memoryLimitMb: plasmoid.configuration.memoryLimitMb
         maxFps: plasmoid.configuration.maxFps
         gpuRendering: plasmoid.configuration.gpuRendering
@@ -317,7 +317,7 @@ Item {
 
         onFindResult: matches => findBar.matches = matches
 
-        onEngineCrashed: console.warn("ChatAI: web engine restarted after a crash")
+        onEngineCrashed: console.warn("Prajna: web engine restarted after a crash")
     }
 
     // Save the open tabs (all but the first), to reopen them next time.

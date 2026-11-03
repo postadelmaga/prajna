@@ -3,6 +3,9 @@
     "KPlugin": {
         "Authors": [
             {
+                "Name": "Francesco Magazzu"
+            },
+            {
                 "Email": "denysmb@zoho.com",
                 "Name": "Denys Madureira"
             },
@@ -12,12 +15,14 @@
             }
         ],
         "Category": "Online Services",
-        "Description": "A range of chatbots in your desktop",
+        "Description": "AI chats in a light glass popup: ChatGPT, Claude, Gemini and more, with tabs",
         "Icon": "applications-internet",
-        "Id": "ChatAI-Plasmoid",
+        "Id": "io.github.postadelmaga.prajna",
         "License": "GPL-2.0+",
-        "Name": "ChatAI",
-        "Website": "https://github.com/DenysMb/ChatAI-Plasmoid"
+        "Name": "Prajna",
+        "Website": "https://github.com/postadelmaga/prajna",
+        "BugReportUrl": "https://github.com/postadelmaga/prajna/issues",
+        "Version": "3.0.0"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

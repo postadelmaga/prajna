@@ -12,7 +12,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 
-import "../lib/chatai"
+import "../lib/prajna"
 import "sites.js" as Sites
 
 // Main plasmoid item that contains all the widget functionality

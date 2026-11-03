@@ -1,4 +1,4 @@
-/* Transparent page background (injected by chatai-webwpe at document start).
+/* Transparent page background (injected by prajna-engine at document start).
  *
  * Makes the page's own background see-through so the Plasma popup (blurred
  * by KWin) shows behind the chat, while keeping everything that sits on top
@@ -19,32 +19,32 @@
  * requestAnimationFrame, which runs right before every frame is painted (a
  * site's style sheet can colour existing nodes without any mutation). The
  * engine style sheet is:
- *   html:not([data-chatai-probe]), html:not([data-chatai-probe]) > body,
- *   [data-chatai-clear], [data-chatai-clear-before]::before,
- *   [data-chatai-clear-after]::after { background-color: transparent !important }
- *   [data-chatai-clear-i]:not(:hover):not(:active):not(:focus-visible)
+ *   html:not([data-prajna-probe]), html:not([data-prajna-probe]) > body,
+ *   [data-prajna-clear], [data-prajna-clear-before]::before,
+ *   [data-prajna-clear-after]::after { background-color: transparent !important }
+ *   [data-prajna-clear-i]:not(:hover):not(:active):not(:focus-visible)
  *     { background-color: transparent !important }
- *   [data-chatai-clear-img] { background-image: none !important }
- * data-chatai-probe briefly lifts the html/body rule to read their real
- * colour; cleared elements remember theirs in data-chatai-clear. */
+ *   [data-prajna-clear-img] { background-image: none !important }
+ * data-prajna-probe briefly lifts the html/body rule to read their real
+ * colour; cleared elements remember theirs in data-prajna-clear. */
 (() => {
-  if (window.__chataiClear) {
-    window.__chataiClear.start();
+  if (window.__prajnaClear) {
+    window.__prajnaClear.start();
     return;
   }
-  const ATTR = 'data-chatai-clear';
+  const ATTR = 'data-prajna-clear';
   /* pseudo-elements (e.g. a full-page ::before splash) get their own marks */
-  const PSEUDO = [['::before', 'data-chatai-clear-before'], ['::after', 'data-chatai-clear-after']];
-  const ATTR_I = 'data-chatai-clear-i';     /* interactive: keeps hover colour */
-  const ATTR_IMG = 'data-chatai-clear-img';  /* base-coloured fade */
-  const MARKS = [ATTR, ATTR_I, ATTR_IMG, 'data-chatai-clear-before', 'data-chatai-clear-after'];
+  const PSEUDO = [['::before', 'data-prajna-clear-before'], ['::after', 'data-prajna-clear-after']];
+  const ATTR_I = 'data-prajna-clear-i';     /* interactive: keeps hover colour */
+  const ATTR_IMG = 'data-prajna-clear-img';  /* base-coloured fade */
+  const MARKS = [ATTR, ATTR_I, ATTR_IMG, 'data-prajna-clear-before', 'data-prajna-clear-after'];
   const ALL = MARKS.map(a => '[' + a + ']').join(',');
   const unmark = (e) => {
     for (const a of MARKS)
       e.removeAttribute(a);
   };
   const cleared = (e) => e.hasAttribute(ATTR) || e.hasAttribute(ATTR_I);
-  const PROBE = 'data-chatai-probe';
+  const PROBE = 'data-prajna-probe';
   /* never painted page background */
   const IGNORE = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'BR', 'IMG', 'SVG', 'PATH', 'VIDEO',
     'CANVAS', 'IFRAME', 'TEMPLATE', 'NOSCRIPT', 'INPUT', 'TEXTAREA', 'SELECT', 'OPTION']);
@@ -287,7 +287,7 @@
       rootObs.observe(e, {attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-mode']});
   }
 
-  window.__chataiClear = {
+  window.__prajnaClear = {
     /* one full pass (also used by tests and benchmarks) */
     scan: () => fullScan(),
     start() {
@@ -342,5 +342,5 @@
         unmark(e);
     },
   };
-  window.__chataiClear.start();
+  window.__prajnaClear.start();
 })();

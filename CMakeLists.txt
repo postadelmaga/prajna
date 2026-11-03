@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted-GPL
 #
-# ChatAI plasmoid, lightweight edition:
-#  - engine/  chatai-webwpe: out-of-process WPE WebKit renderer (C)
-#  - plugin/  org.kde.plasma.private.chatai: QML item that shows its frames
+# Prajna plasmoid, lightweight edition:
+#  - engine/  prajna-engine: out-of-process WPE WebKit renderer (C)
+#  - plugin/  io.github.postadelmaga.prajna: QML item that shows its frames
 #  - contents/ + metadata.json: the plasmoid package
-# Engine and plugin are installed INSIDE the package (contents/lib/chatai).
+# Engine and plugin are installed INSIDE the package (contents/lib/prajna).
 cmake_minimum_required(VERSION 3.22)
-project(chatai-plasmoid VERSION 3.0.0 LANGUAGES C CXX)
+project(prajna VERSION 3.0.0 LANGUAGES C CXX)
 
 find_package(ECM 6.0 REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
@@ -26,9 +26,9 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(WPE REQUIRED IMPORTED_TARGET wpe-webkit-2.0>=2.48 wpe-platform-2.0>=2.48)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
 
-set(CHATAI_PLASMOID_ID "ChatAI-Plasmoid")
-set(CHATAI_PACKAGE_DIR ${KDE_INSTALL_DATADIR}/plasma/plasmoids/${CHATAI_PLASMOID_ID})
-set(CHATAI_PACKAGE_LIBDIR ${CHATAI_PACKAGE_DIR}/contents/lib/chatai)
+set(PRAJNA_PLASMOID_ID "io.github.postadelmaga.prajna")
+set(PRAJNA_PACKAGE_DIR ${KDE_INSTALL_DATADIR}/plasma/plasmoids/${PRAJNA_PLASMOID_ID})
+set(PRAJNA_PACKAGE_LIBDIR ${PRAJNA_PACKAGE_DIR}/contents/lib/prajna)
 
 add_subdirectory(engine)
 add_subdirectory(plugin)
@@ -39,9 +39,9 @@ if(BUILD_TESTING)
 endif()
 
 # The plasmoid package itself (pure QML + assets + translations).
-install(FILES metadata.json DESTINATION ${CHATAI_PACKAGE_DIR})
-install(DIRECTORY contents DESTINATION ${CHATAI_PACKAGE_DIR})
+install(FILES metadata.json DESTINATION ${PRAJNA_PACKAGE_DIR})
+install(DIRECTORY contents DESTINATION ${PRAJNA_PACKAGE_DIR})
 # Lets website notifications show up without any manual setup.
-install(FILES data/chatai_plasmoid.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR})
+install(FILES data/prajna.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR})
 
 feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES FATAL_ON_MISSING_REQUIRED_PACKAGES)

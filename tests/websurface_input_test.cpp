@@ -58,11 +58,11 @@ private Q_SLOTS:
     {
         QVERIFY(m_profile.isValid());
         m_engine = new QQmlEngine(this);
-        m_engine->addImportPath(QStringLiteral(CHATAI_QML_IMPORT_DIR));
+        m_engine->addImportPath(QStringLiteral(PRAJNA_QML_IMPORT_DIR));
         QQmlComponent c(m_engine);
         c.setData(R"(
             import QtQuick
-            import org.kde.plasma.private.chatai
+            import io.github.postadelmaga.prajna
             WebSurface {
                 property var testResult
                 width: 400; height: 300
@@ -168,9 +168,9 @@ private Q_SLOTS:
         QTest::qWait(200);
         const QImage full = m_window->grabWindow();
 
-        if (partial != full && qEnvironmentVariableIsSet("CHATAI_TEST_DUMP")) {
-            partial.save(qEnvironmentVariable("CHATAI_TEST_DUMP") + QStringLiteral("/partial.png"));
-            full.save(qEnvironmentVariable("CHATAI_TEST_DUMP") + QStringLiteral("/full.png"));
+        if (partial != full && qEnvironmentVariableIsSet("PRAJNA_TEST_DUMP")) {
+            partial.save(qEnvironmentVariable("PRAJNA_TEST_DUMP") + QStringLiteral("/partial.png"));
+            full.save(qEnvironmentVariable("PRAJNA_TEST_DUMP") + QStringLiteral("/full.png"));
             QRect diff;
             for (int y = 0; y < qMin(partial.height(), full.height()); ++y)
                 for (int x = 0; x < qMin(partial.width(), full.width()); ++x)

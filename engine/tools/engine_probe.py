@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""engine_probe.py — drive chatai-webwpe without Qt, for testing.
+"""engine_probe.py — drive prajna-engine without Qt, for testing.
 
 Spawns the engine on a socketpair (fd 3) + shm file, loads a URL, prints the
 events it emits, optionally runs a small script of actions, and saves the
@@ -50,7 +50,7 @@ def png(path, w, h, bgra):
 
 class Probe:
     def __init__(self, engine, url, w, h, scale, cache, extra=()):
-        self.shm_path = tempfile.mktemp(prefix="chatai-probe-", dir="/dev/shm")
+        self.shm_path = tempfile.mktemp(prefix="prajna-probe-", dir="/dev/shm")
         with open(self.shm_path, "wb") as f:
             f.truncate(SHM_SIZE)
         self.parent, child = socket.socketpair()
@@ -145,7 +145,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=8)
     ap.add_argument("--size", default="900x700")
     ap.add_argument("--scale", type=int, default=100)
-    ap.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "chatai-probe-cache"))
+    ap.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "prajna-probe-cache"))
     ap.add_argument("--js", action="append", default=[])
     a = ap.parse_args()
     w, h = map(int, a.size.split("x"))

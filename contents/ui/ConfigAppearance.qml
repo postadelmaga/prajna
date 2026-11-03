@@ -14,7 +14,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.iconthemes as KIconThemes
 import org.kde.kcmutils as KCM
 
-import "../lib/chatai"
+import "../lib/prajna"
 
 KCM.SimpleKCM {
     id: page
