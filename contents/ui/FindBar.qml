@@ -12,7 +12,8 @@ import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.kirigami as Kirigami
 
-Rectangle {
+// Find in page: a floating panel at the top right, over the page.
+GlassPanel {
     id: findBar
 
     property bool findBarVisible: false
@@ -23,15 +24,14 @@ Rectangle {
     signal closeRequested()
 
     visible: findBarVisible
-    height: visible ? findBarRow.height + Kirigami.Units.smallSpacing * 2 : 0
-    color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.88)
-    radius: Kirigami.Units.cornerRadius
+    height: findBarRow.implicitHeight + Kirigami.Units.smallSpacing * 2
+    width: Math.min(parent.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 22)
     z: 5
 
     anchors {
         top: parent.top
-        left: parent.left
         right: parent.right
+        margins: Kirigami.Units.largeSpacing
     }
 
     RowLayout {

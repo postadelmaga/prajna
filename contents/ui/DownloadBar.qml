@@ -21,18 +21,20 @@ Column {
     property var webviewItem
 
     visible: downloadsModel && downloadsModel.count > 0
-    spacing: 4
+    spacing: Kirigami.Units.smallSpacing
 
+    // floating cards above the bottom edge (where chat composers live)
     anchors {
         left: parent.left
         right: parent.right
         bottom: parent.bottom
+        margins: Kirigami.Units.largeSpacing
     }
 
     Repeater {
         model: downloadsModel
 
-        delegate: Rectangle {
+        delegate: GlassPanel {
             id: row
 
             required property int index
@@ -48,14 +50,20 @@ Column {
             readonly property bool finished: dlState === WebSurface.DownloadFinished
 
             width: parent.width
-            height: 40
-            color: Qt.alpha(Kirigami.Theme.backgroundColor, 0.88)
-            radius: Kirigami.Units.cornerRadius
+            height: rowLayout.implicitHeight + Kirigami.Units.smallSpacing * 2
 
             RowLayout {
+                id: rowLayout
                 anchors.fill: parent
-                anchors.margins: 8
-                spacing: 8
+                anchors.leftMargin: Kirigami.Units.largeSpacing
+                anchors.rightMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    source: row.finished ? "emblem-success" : (row.dlState === WebSurface.DownloadFailed ? "emblem-error" : "download")
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                }
 
                 PlasmaComponents3.Label {
                     Layout.fillWidth: true

@@ -63,10 +63,6 @@ Item {
         webview.runJavaScript("window.print()");
     }
 
-    // Overlays float over a see-through page: a slightly translucent tint of
-    // the Plasma theme instead of an opaque slab.
-    readonly property color overlayColor: Qt.alpha(Kirigami.Theme.backgroundColor, 0.88)
-
     function isDarkTheme() {
         const color = Kirigami.Theme.backgroundColor;
         return (0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b) < 0.5;
@@ -207,7 +203,7 @@ Item {
         id: webview
 
         anchors.fill: parent
-        anchors.topMargin: (findBar.visible ? findBar.height : 0) + (popupBar.visible ? popupBar.height : 0)
+        anchors.topMargin: popupBar.visible ? popupBar.height + Kirigami.Units.smallSpacing * 2 : 0
 
         url: plasmoid.configuration.url
         profileDirectory: StandardPaths.writableLocation(StandardPaths.GenericDataLocation).toString().replace(/^file:\/\//, '') + "/chatai-plasmoid/" + webViewRoot.effectiveProfileName
@@ -313,18 +309,17 @@ Item {
     }
 
     // OAuth / "Sign in with ..." windows open on top of the chat.
-    Rectangle {
+    GlassPanel {
         id: popupBar
 
         visible: webview.popupOpen
         height: visible ? popupRow.implicitHeight + Kirigami.Units.smallSpacing * 2 : 0
-        color: webViewRoot.overlayColor
-        radius: Kirigami.Units.cornerRadius
         z: 5
         anchors {
-            top: findBar.visible ? findBar.bottom : parent.top
+            top: parent.top
             left: parent.left
             right: parent.right
+            margins: Kirigami.Units.smallSpacing
         }
 
         RowLayout {
@@ -372,13 +367,11 @@ Item {
         }
     }
 
-    Rectangle {
+    GlassPanel {
         id: statusBubble
 
-        property int padding: 8
+        property int padding: Kirigami.Units.smallSpacing * 2
 
-        color: webViewRoot.overlayColor
-        radius: Kirigami.Units.cornerRadius
         visible: webview.hoveredLink !== ""
         anchors.left: parent.left
         anchors.bottom: parent.bottom

@@ -24,6 +24,8 @@ KCM.SimpleKCM {
 
     property bool cfg_transparentBackground
     property bool cfg_blurBehind
+    property int cfg_tintStrength
+    property bool cfg_glassGrain
     property int cfg_iconMode
     property string cfg_customIcon
     property bool cfg_hideHeader
@@ -70,6 +72,39 @@ KCM.SimpleKCM {
         Hint {
             visible: blurInfo.available && page.cfg_transparentBackground && !page.cfg_blurBehind
             text: i18n("Without blur the desktop shows through sharply, which can make text harder to read.")
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: i18n("Veil:")
+            enabled: page.cfg_transparentBackground
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.Slider {
+                id: tintSlider
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                from: 0
+                to: 90
+                stepSize: 5
+                snapMode: QQC2.Slider.SnapAlways
+                value: page.cfg_tintStrength
+                onMoved: page.cfg_tintStrength = value
+            }
+            QQC2.Label {
+                text: i18n("%1%", Math.round(tintSlider.value))
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 2
+                font.features: { "tnum": 1 }
+            }
+        }
+        Hint {
+            enabled: page.cfg_transparentBackground
+            text: i18n("A veil in the theme's colour over the blurred desktop: stronger keeps text readable on busy wallpapers.")
+        }
+
+        QQC2.CheckBox {
+            text: i18n("Fine grain texture")
+            enabled: page.cfg_transparentBackground
+            checked: page.cfg_glassGrain
+            onToggled: page.cfg_glassGrain = checked
         }
 
         Kirigami.InlineMessage {

@@ -163,6 +163,16 @@
       <label>Blur what is behind the popup (KWin blur effect)</label>
       <default>true</default>
     </entry>
+    <entry name="tintStrength" type="Int">
+      <label>Strength of the theme-coloured veil over the blurred background, in percent</label>
+      <default>40</default>
+      <min>0</min>
+      <max>90</max>
+    </entry>
+    <entry name="glassGrain" type="Bool">
+      <label>Faint grain texture on the glass background</label>
+      <default>true</default>
+    </entry>
     <entry name="transparentBackground" type="Bool">
       <label>See-through page background (the blurred popup shows behind the chat)</label>
       <default>true</default>

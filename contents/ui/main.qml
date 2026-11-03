@@ -75,17 +75,48 @@ PlasmoidItem {
     }
 
     // Widget appearance when expanded (full view)
-    fullRepresentation: ColumnLayout {
+    // Popup: glass background (blur + tint + grain) under the header/page
+    // layout. Kept outside the ColumnLayout: reorderComponents() re-parents
+    // every child of the layout.
+    fullRepresentation: Item {
+        id: popupRoot
+
+        readonly property alias webviewRoot: mainLayout.webviewRoot
+        readonly property bool glassVisible: plasmoid.configuration.transparentBackground
+
+        // Default dimensions (used when no saved size exists)
+        readonly property int defaultWidth: Kirigami.Units.gridUnit * 28
+        readonly property int defaultHeight: Kirigami.Units.gridUnit * 39
+
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 20
+        Layout.minimumHeight: Kirigami.Units.gridUnit * 28
+        // Use saved dimensions if available, otherwise use defaults
+        Layout.preferredWidth: plasmoid.configuration.dialogWidth > 0 ? plasmoid.configuration.dialogWidth : defaultWidth
+        Layout.preferredHeight: plasmoid.configuration.dialogHeight > 0 ? plasmoid.configuration.dialogHeight : defaultHeight
+
+        // Blur behind the popup on/off (Plasma's default is on).
+        PopupBlur {
+            blur: plasmoid.configuration.blurBehind
+        }
+
+        GlassBackground {
+            anchors.fill: parent
+            visible: popupRoot.glassVisible
+            strength: plasmoid.configuration.tintStrength / 100
+            grain: plasmoid.configuration.glassGrain
+            headerHeight: headerRoot.visible ? headerRoot.height + Kirigami.Units.smallSpacing : 0
+            headerAtBottom: mainLayout.reverseLayout
+        }
+
+    ColumnLayout {
         id: mainLayout
+
+        anchors.fill: parent
 
         // Expose WebView root for other components
         property alias webviewRoot: webviewLoader.item
         // Update the property to use Types.Location and add the change monitor
         property bool reverseLayout: plasmoid.location === PlasmaCore.Types.TopEdge
-
-        // Default dimensions (used when no saved size exists)
-        readonly property int defaultWidth: Kirigami.Units.gridUnit * 28
-        readonly property int defaultHeight: Kirigami.Units.gridUnit * 39
 
         // Function to reorder components
         function reorderComponents() {
@@ -107,12 +138,6 @@ PlasmoidItem {
             }
         }
 
-        // Set minimum dimensions for the expanded view
-        Layout.minimumWidth: Kirigami.Units.gridUnit * 20
-        Layout.minimumHeight: Kirigami.Units.gridUnit * 28
-        // Use saved dimensions if available, otherwise use defaults
-        Layout.preferredWidth: plasmoid.configuration.dialogWidth > 0 ? plasmoid.configuration.dialogWidth : defaultWidth
-        Layout.preferredHeight: plasmoid.configuration.dialogHeight > 0 ? plasmoid.configuration.dialogHeight : defaultHeight
 
         Component.onCompleted: {
             reorderComponents();
@@ -144,11 +169,6 @@ PlasmoidItem {
         onHeightChanged: saveSizeTimer.restart()
 
         spacing: 0
-
-        // Blur behind the popup on/off (Plasma's default is on).
-        PopupBlur {
-            blur: plasmoid.configuration.blurBehind
-        }
 
         // Add monitor for plasmoid location change
         Connections {
@@ -385,5 +405,6 @@ PlasmoidItem {
 
             target: root
         }
+    }
     }
 }
