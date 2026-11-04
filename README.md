@@ -29,7 +29,20 @@ web engine.
 
 ## Install
 
-Requirements: Plasma 6, Qt ≥ 6.6, KDE Frameworks/ECM 6, `wpewebkit` ≥ 2.48
+**Ready-made package (Arch-based systems):** download `prajna.plasmoid` from
+the [Releases](https://github.com/postadelmaga/prajna/releases) (or the latest
+[build](https://github.com/postadelmaga/prajna/actions)), then:
+
+```sh
+sudo pacman -S --needed wpewebkit      # the engine's runtime dependency
+kpackagetool6 -t Plasma/Applet -i prajna.plasmoid    # -u to upgrade
+systemctl --user restart plasma-plasmashell
+```
+
+The package contains compiled parts built on Arch Linux: on other
+distributions build from source.
+
+**From source.** Requirements: Plasma 6, Qt ≥ 6.6, KDE Frameworks/ECM 6, `wpewebkit` ≥ 2.48
 (with the WPE Platform API), `libxkbcommon`, CMake and a C/C++ compiler.
 
 ```sh
@@ -39,6 +52,8 @@ sudo pacman -S --needed wpewebkit extra-cmake-modules cmake base-devel
 git clone https://github.com/postadelmaga/prajna.git
 cd prajna
 ./install.sh                 # per user, into ~/.local (no root needed)
+# or build, test and pack prajna.plasmoid:
+./build.sh
 # or system-wide:
 cmake -B build -DCMAKE_INSTALL_PREFIX=/usr && cmake --build build && sudo cmake --install build
 ```

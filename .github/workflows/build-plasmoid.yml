@@ -1,0 +1,54 @@
+name: Build and Release Plasmoid
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Prajna needs WPE WebKit >= 2.48 (WPE Platform API), Qt 6 and KF6:
+    # build on Arch, where they are current. The package targets Arch-based
+    # systems (same library versions).
+    container: archlinux:latest
+
+    steps:
+    - name: Install build dependencies
+      run: |
+        pacman -Syu --noconfirm --needed base-devel git cmake extra-cmake-modules \
+          qt6-base qt6-declarative kwindowsystem wpewebkit libxkbcommon zip ttf-dejavu
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Build plasmoid package
+      env:
+        # the tests start the real engine; WebKit's bubblewrap sandbox can't
+        # run inside the CI container
+        WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+        QT_QPA_PLATFORM: offscreen
+      run: |
+        chmod +x build.sh
+        ./build.sh
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: plasmoid-package
+        path: prajna.plasmoid
+        retention-days: 30
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: prajna.plasmoid
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
