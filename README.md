@@ -6,6 +6,8 @@ Your AI chats in a light **glass popup** on the KDE Plasma panel: ChatGPT,
 Claude, Gemini, Copilot, Perplexity, DeepSeek, Grok and more, or any site you
 add.
 
+![Prajna: Gemini in the glass popup over the desktop](Screenshot/main.png)
+
 - **Glass look**: the site's own background disappears and the chat floats
   on the blurred desktop, under a veil in your theme's colour (adjustable),
   with an optional fine grain. Messages, menus and the text box keep their
