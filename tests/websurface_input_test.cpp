@@ -17,6 +17,8 @@
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QStorageInfo>
+#include <QStandardPaths>
 #include <QTest>
 #include <rhi/qrhi.h>
 
@@ -254,7 +256,12 @@ private Q_SLOTS:
         qint64 shmHidden = shmBefore;
         (void)QTest::qWaitFor([&] { return (shmHidden = engineShmemKb()) < shmBefore; }, 5000);
         qInfo() << "engine shm while shown" << shmBefore << "kB, hidden" << shmHidden << "kB";
-        QVERIFY2(shmHidden < shmBefore, "the unpublished slot was not released");
+        // only tmpfs gives pages back (a runtime dir on disk, as in some
+        // containers, isn't shared memory at all)
+        if (QStorageInfo(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation)).fileSystemType() == "tmpfs")
+            QVERIFY2(shmHidden < shmBefore, "the unpublished slot was not released");
+        else
+            qInfo() << "runtime dir not on tmpfs: release not checked";
         m_web->setProperty("suspended", false);
         QTest::qWait(300);
         const QImage after = m_window->grabWindow();

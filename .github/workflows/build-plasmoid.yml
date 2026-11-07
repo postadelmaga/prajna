@@ -35,6 +35,9 @@ jobs:
         WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
         QT_QPA_PLATFORM: offscreen
       run: |
+        # a tmpfs runtime dir, as on a desktop session: the frame buffer
+        # lives there (shared memory, sparse, released while hidden)
+        export XDG_RUNTIME_DIR=/dev/shm/runtime && mkdir -p -m 700 "$XDG_RUNTIME_DIR"
         chmod +x build.sh
         ./build.sh
 
