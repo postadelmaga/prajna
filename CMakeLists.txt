@@ -6,7 +6,7 @@
 #  - contents/ + metadata.json: the plasmoid package
 # Engine and plugin are installed INSIDE the package (contents/lib/prajna).
 cmake_minimum_required(VERSION 3.22)
-project(prajna VERSION 3.1.0 LANGUAGES C CXX)
+project(prajna VERSION 3.1.1 LANGUAGES C CXX)
 
 find_package(ECM 6.0 REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
