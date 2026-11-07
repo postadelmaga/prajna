@@ -18,6 +18,7 @@
 #include <atomic>
 #include <QtQml/qqmlregistration.h>
 
+class FrameTexture;
 class QProcess;
 class QSocketNotifier;
 class QTimer;
@@ -273,7 +274,8 @@ private:
     void sendGeometry();
     void sendVisibility();
     void pushClipboard();
-    bool copyFrame();
+    enum class CopyResult { Copied, NoFrame, Torn };
+    CopyResult copyFrame(FrameTexture *texture);
     qreal devicePixelRatio() const;
     int modifiers(Qt::KeyboardModifiers mods, Qt::MouseButtons buttons) const;
     void sendKey(QKeyEvent *e, bool down);
@@ -294,14 +296,16 @@ private:
     QTimer *m_restartTimer = nullptr;
     int m_crashCount = 0;
 
-    // frame
-    QImage m_frame;               // last frame, device pixels (render thread)
-    quint32 m_frameSeq = 0;
+    // frame: copied from the shm slot straight into the texture's upload
+    // staging (FrameTexture), or into m_fallbackImage when the scene graph
+    // can't do partial uploads. Touched only in updatePaintNode (render
+    // thread, GUI thread blocked) and on the GUI thread outside syncs.
+    QSize m_frameSize;            // device pixels of the last copied frame
+    QImage m_fallbackImage;       // whole frame, only without FrameTexture
     bool m_frameDirty = false;    // a new frame (or a full re-copy) is wanted
-    bool m_textureDirty = false;
+    bool m_textureDirty = false;  // the texture lost its content: copy it all
     QRect m_pendingDamage;        // reported by the engine, not yet copied
     bool m_pendingFull = true;    // next copy must take the whole frame
-    QRect m_uploadRegion;         // copied into m_frame, not yet uploaded
     std::atomic<bool> m_frameResident{false};
 
     // state

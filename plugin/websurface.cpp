@@ -1168,18 +1168,18 @@ void WebSurface::sendVisibility()
     m_sentVisible = visible;
     sendInts(ZURF_OP_SET_VISIBLE, {visible ? 1 : 0});
     if (!visible) {
-        // Free the host-side frame copy right away: m_frame is only touched
-        // in updatePaintNode, i.e. during sync while this (GUI) thread is
-        // blocked, so this can't race with the render thread. The window may
-        // already be hidden and never render again until shown. The engine
-        // slots keep a complete frame, re-copied whole on show.
-        m_frame = QImage();
+        // No host-side copy of the frame outlives an upload (the staging
+        // buffer goes to the GPU and is freed), except the fallback image
+        // of a scene graph without partial uploads: freed here. It is only
+        // touched in updatePaintNode, i.e. during sync while this (GUI)
+        // thread is blocked, so this can't race with the render thread.
+        // The texture stays on the GPU; the damage reported while hidden is
+        // copied on show (all of it if the texture was lost meanwhile).
+        m_fallbackImage = QImage();
         m_frameResident = false;
-        m_uploadRegion = QRect();
-        m_pendingFull = true;
-        m_frameDirty = true;
+        update(); // one more sync, if the window still renders: drops staging
     } else {
-        m_frameDirty = true; // re-copy even if the page doesn't repaint on show
+        m_frameDirty = true; // catch up even if the page doesn't repaint on show
         update();
     }
 }
@@ -1226,10 +1226,10 @@ qreal WebSurface::devicePixelRatio() const
 // ---------------------------------------------------------------------------
 // rendering
 
-bool WebSurface::copyFrame()
+WebSurface::CopyResult WebSurface::copyFrame(FrameTexture *texture)
 {
     if (!m_shm)
-        return false;
+        return CopyResult::NoFrame;
     auto *hdr = static_cast<zurf_shm_header *>(m_shm);
     const auto *slots = static_cast<const uchar *>(m_shm) + sizeof(zurf_shm_header);
     for (int attempt = 0; attempt < 8; ++attempt) {
@@ -1239,55 +1239,66 @@ bool WebSurface::copyFrame()
         const quint32 w = __atomic_load_n(&hdr->width, __ATOMIC_RELAXED);
         const quint32 h = __atomic_load_n(&hdr->height, __ATOMIC_RELAXED);
         if (w == 0 || h == 0 || w > ZURF_SHM_MAX_W || h > ZURF_SHM_MAX_H)
-            return false;
+            return CopyResult::NoFrame; // none published yet
         const QRect whole(0, 0, int(w), int(h));
-        bool full = m_pendingFull;
-        if (m_frame.size() != whole.size()) {
-            m_frame = QImage(whole.size(), QImage::Format_ARGB32_Premultiplied);
-            full = true;
-        }
         // Both slots always hold complete frames, so copying only what the
-        // engine reported as changed keeps m_frame exact. A frame whose event
-        // hasn't been read yet is caught up when its event arrives.
-        const QRect r = full ? whole : m_pendingDamage.intersected(whole);
-        if (r.isEmpty())
-            return true;
+        // engine reported as changed keeps the copy exact. A frame whose
+        // event hasn't been read yet is caught up when its event arrives.
+        const QRect want = m_pendingFull || whole.size() != m_frameSize ? whole : m_pendingDamage.intersected(whole);
+        QRect r;
+        uchar *dst = nullptr;
+        size_t dstStride = 0;
+        if (texture) {
+            r = texture->beginUpdate(whole.size(), want);
+            dst = texture->staging();
+            dstStride = size_t(r.width()) * 4;
+        } else {
+            bool fresh = false;
+            if (m_fallbackImage.size() != whole.size()) {
+                m_fallbackImage = QImage(whole.size(), QImage::Format_ARGB32_Premultiplied);
+                fresh = true;
+            }
+            r = fresh ? whole : want;
+            dstStride = size_t(m_fallbackImage.bytesPerLine());
+            dst = m_fallbackImage.bits() + dstStride * size_t(r.y()) + size_t(r.x()) * 4;
+        }
         const uchar *src = slots + size_t((s1 / 2) % 2) * ZURF_SHM_SLOT_SIZE;
         const size_t row = size_t(w) * 4;
-        if (r.width() == int(w) && size_t(m_frame.bytesPerLine()) == row) {
-            memcpy(m_frame.scanLine(r.y()), src + row * size_t(r.y()), row * size_t(r.height()));
+        if (r.isEmpty()) {
+        } else if (r.width() == int(w) && dstStride == row) {
+            memcpy(dst, src + row * size_t(r.y()), row * size_t(r.height()));
         } else {
             const size_t off = size_t(r.x()) * 4, len = size_t(r.width()) * 4;
-            for (int y = r.y(); y < r.y() + r.height(); ++y)
-                memcpy(m_frame.scanLine(y) + off, src + row * size_t(y) + off, len);
+            for (int y = 0; y < r.height(); ++y)
+                memcpy(dst + dstStride * size_t(y), src + row * size_t(r.y() + y) + off, len);
         }
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         // Accept only if nothing was published meanwhile: then both the
-        // header and the slot belong to the same frame.
+        // header and the slot belong to the same frame. Otherwise the
+        // engine may have been writing this very slot: copy again.
         if (__atomic_load_n(&hdr->seq, __ATOMIC_ACQUIRE) == s1) {
-            m_frameSeq = s1;
-            m_uploadRegion |= r;
+            if (texture)
+                texture->commitStaging();
+            m_frameSize = whole.size();
             m_pendingDamage = QRect();
             m_pendingFull = false;
-            return true;
+            return CopyResult::Copied;
         }
     }
-    return false;
+    return CopyResult::Torn;
 }
 
 QSGNode *WebSurface::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
     auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
-    if (m_sentVisible == 0)
-        return node; // hidden: keep what's on the GPU (if anything), copy nothing
-    if (m_frameDirty) {
-        m_frameDirty = false;
-        if (!copyFrame()) {
-            m_frameDirty = true;
-            QMetaObject::invokeMethod(this, &QQuickItem::update, Qt::QueuedConnection); // retry next frame
-        }
+    if (m_sentVisible == 0) {
+        // hidden: keep what's on the GPU (if anything), copy nothing, and
+        // drop a staging buffer that never made it to an upload
+        if (auto *tex = node ? qobject_cast<FrameTexture *>(node->texture()) : nullptr)
+            tex->dropStaging();
+        return node;
     }
-    if (m_frame.isNull() || !window()) {
+    if (!window()) {
         delete node;
         return nullptr;
     }
@@ -1297,6 +1308,7 @@ QSGNode *WebSurface::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         delete node; // scene graph backend changed under us
         node = nullptr;
     }
+    const bool newNode = !node;
     if (!node) {
         node = new QSGSimpleTextureNode;
         node->setOwnsTexture(true);
@@ -1304,24 +1316,47 @@ QSGNode *WebSurface::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         if (partial)
             node->setTexture(new FrameTexture(rhi));
         m_textureDirty = true;
-        m_uploadRegion = m_frame.rect();
     }
-    if (partial) {
-        if (!m_uploadRegion.isEmpty() || m_textureDirty) {
-            auto *tex = static_cast<FrameTexture *>(node->texture());
-            tex->setImage(m_frame, m_textureDirty ? m_frame.rect() : m_uploadRegion);
-            node->markDirty(QSGNode::DirtyMaterial);
+    if (m_textureDirty) {
+        // new or lost texture: everything comes from the shm slot again
+        m_pendingFull = true;
+        m_frameDirty = true;
+    }
+    bool copied = false;
+    if (m_frameDirty) {
+        m_frameDirty = false;
+        switch (copyFrame(partial ? static_cast<FrameTexture *>(node->texture()) : nullptr)) {
+        case CopyResult::Copied:
+            copied = true;
+            m_textureDirty = false;
+            break;
+        case CopyResult::Torn: // the engine published meanwhile: next frame
+            if (partial)
+                static_cast<FrameTexture *>(node->texture())->dropStaging();
+            m_frameDirty = true;
+            QMetaObject::invokeMethod(this, &QQuickItem::update, Qt::QueuedConnection);
+            break;
+        case CopyResult::NoFrame: // wait for ZURF_EV_FRAME
+            m_frameDirty = m_textureDirty;
+            break;
         }
-    } else if (m_textureDirty || !m_uploadRegion.isEmpty()) {
-        node->setTexture(window()->createTextureFromImage(m_frame)); // node deletes the old one
     }
-    m_textureDirty = false;
-    m_uploadRegion = QRect();
+    if (m_frameSize.isEmpty() || (m_textureDirty && newNode)) {
+        delete node; // nothing to show yet
+        return nullptr;
+    }
+    // (an existing node whose re-copy failed keeps showing its texture)
+    if (copied) {
+        if (partial)
+            node->markDirty(QSGNode::DirtyMaterial);
+        else
+            node->setTexture(window()->createTextureFromImage(m_fallbackImage)); // node deletes the old one
+    }
     m_frameResident = true;
     // Map device pixels to logical ones; while a resize is in flight the
     // stale frame keeps its size instead of being stretched.
     const qreal dpr = devicePixelRatio();
-    node->setRect(QRectF(0, 0, m_frame.width() / dpr, m_frame.height() / dpr));
+    node->setRect(QRectF(0, 0, m_frameSize.width() / dpr, m_frameSize.height() / dpr));
     return node;
 }
 

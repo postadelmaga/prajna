@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <QImage>
 #include <QRect>
 #include <QSGDynamicTexture>
 
@@ -32,9 +31,18 @@ public:
 
     static bool isSupported(QRhi *rhi);
 
-    // Queue `region` of `image` (device pixels) for upload. Only that
-    // region's bytes are copied; the image is not retained.
-    void setImage(const QImage &image, const QRect &region);
+    // Partial update of a frame of `size` (device pixels) whose `region`
+    // changed. Returns the rectangle the caller must now write into
+    // staging() as tightly packed BGRA rows: `region` united with whatever
+    // still waits for upload, or the whole frame when the size changed (or
+    // on the first update). Nothing is uploaded until commitStaging(): a
+    // caller whose copy turned out torn simply calls beginUpdate() again.
+    QRect beginUpdate(const QSize &size, const QRect &region);
+    uchar *staging();
+    void commitStaging();
+    // Frees the staging buffer of an update that won't be uploaded (torn
+    // copy, item hidden); what is dirty stays dirty for the next one.
+    void dropStaging();
 
     qint64 comparisonKey() const override;
     QRhiTexture *rhiTexture() const override;
@@ -50,4 +58,5 @@ private:
     QSize m_size;
     QRect m_dirty;        // pending upload, device pixels
     QByteArray m_pending; // m_dirty's pixels, tightly packed BGRA
+    bool m_ready = false; // m_pending holds a complete copy of m_dirty
 };

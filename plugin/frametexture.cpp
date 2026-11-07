@@ -23,25 +23,36 @@ bool FrameTexture::isSupported(QRhi *rhi)
     return rhi && rhi->isTextureFormatSupported(QRhiTexture::BGRA8);
 }
 
-void FrameTexture::setImage(const QImage &image, const QRect &region)
+QRect FrameTexture::beginUpdate(const QSize &size, const QRect &region)
 {
-    if (image.isNull())
-        return;
-    if (image.size() != m_size) {
-        m_size = image.size();
-        m_dirty = image.rect(); // new size: the texture is recreated whole
+    if (size != m_size) {
+        m_size = size;
+        m_dirty = QRect(QPoint(0, 0), size); // new size: the texture is recreated whole
     } else {
-        m_dirty |= region.intersected(image.rect());
+        m_dirty |= region.intersected(QRect(QPoint(0, 0), size));
     }
-    if (m_dirty.isEmpty())
-        return;
-    // Several syncs may precede one render: re-copy the whole union from the
-    // newest image, which is correct for every part of it.
-    const QRect r = m_dirty;
-    const qsizetype rowBytes = qsizetype(r.width()) * 4;
-    m_pending.resize(rowBytes * r.height());
-    for (int y = 0; y < r.height(); ++y)
-        memcpy(m_pending.data() + rowBytes * y, image.constScanLine(r.y() + y) + qsizetype(r.x()) * 4, rowBytes);
+    m_ready = false;
+    // Several syncs may precede one render: the caller re-copies the whole
+    // union from the newest frame, which is correct for every part of it.
+    if (!m_dirty.isEmpty())
+        m_pending.resize(qsizetype(m_dirty.width()) * 4 * m_dirty.height());
+    return m_dirty;
+}
+
+uchar *FrameTexture::staging()
+{
+    return reinterpret_cast<uchar *>(m_pending.data());
+}
+
+void FrameTexture::commitStaging()
+{
+    m_ready = !m_dirty.isEmpty();
+}
+
+void FrameTexture::dropStaging()
+{
+    m_pending = QByteArray();
+    m_ready = false;
 }
 
 qint64 FrameTexture::comparisonKey() const
@@ -79,7 +90,7 @@ void FrameTexture::commitTextureOperations(QRhi *rhi, QRhiResourceUpdateBatch *r
     if (m_size.isEmpty() || rhi != m_rhi)
         return;
     if (!m_texture || m_texture->pixelSize() != m_size) {
-        if (m_dirty != QRect(QPoint(0, 0), m_size))
+        if (m_dirty != QRect(QPoint(0, 0), m_size) || !m_ready)
             return; // wait for a full frame before (re)creating
         delete m_texture;
         m_texture = rhi->newTexture(QRhiTexture::BGRA8, m_size);
@@ -89,8 +100,9 @@ void FrameTexture::commitTextureOperations(QRhi *rhi, QRhiResourceUpdateBatch *r
             return;
         }
     }
-    if (m_dirty.isEmpty())
+    if (m_dirty.isEmpty() || !m_ready)
         return;
+    m_ready = false;
     QRhiTextureSubresourceUploadDescription sub(std::exchange(m_pending, {}));
     sub.setSourceSize(m_dirty.size());
     sub.setDestinationTopLeft(m_dirty.topLeft());
