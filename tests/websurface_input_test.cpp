@@ -250,8 +250,9 @@ private Q_SLOTS:
         const QImage before = m_window->grabWindow();
         const qint64 shmBefore = engineShmemKb();
         m_web->setProperty("suspended", true);
-        QTest::qWait(1800);
-        const qint64 shmHidden = engineShmemKb();
+        // g_timeout_add_seconds() fires on whole-second boundaries: 1-2 s
+        qint64 shmHidden = shmBefore;
+        (void)QTest::qWaitFor([&] { return (shmHidden = engineShmemKb()) < shmBefore; }, 5000);
         qInfo() << "engine shm while shown" << shmBefore << "kB, hidden" << shmHidden << "kB";
         QVERIFY2(shmHidden < shmBefore, "the unpublished slot was not released");
         m_web->setProperty("suspended", false);
@@ -264,7 +265,8 @@ private Q_SLOTS:
         QVERIFY2(after == before, "the view changed after the slots were released");
 
         m_web->setProperty("suspended", true);
-        QTest::qWait(1800);
+        const qint64 shmShown = engineShmemKb();
+        (void)QTest::qWaitFor([&] { return engineShmemKb() < shmShown; }, 5000);
         m_web->setParentItem(nullptr); // the texture is gone: a full copy is needed
         QTest::qWait(100);
         m_web->setProperty("suspended", false);
