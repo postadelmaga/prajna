@@ -22,6 +22,29 @@
 
 #include <xkbcommon/xkbcommon-keysyms.h>
 
+#include <QDir>
+#include <unistd.h>
+
+// RssShmem (kB) of our prajna-engine child: the frame slots it touched.
+static qint64 engineShmemKb()
+{
+    const QStringList pids = QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &p : pids) {
+        QFile stat(QStringLiteral("/proc/%1/stat").arg(p)), comm(QStringLiteral("/proc/%1/comm").arg(p));
+        if (!stat.open(QIODevice::ReadOnly) || !comm.open(QIODevice::ReadOnly) || comm.readAll().trimmed() != "prajna-engine")
+            continue;
+        const QByteArray s = stat.readAll();
+        if (s.mid(s.lastIndexOf(')') + 2).split(' ').value(1).toInt() != getpid())
+            continue;
+        QFile status(QStringLiteral("/proc/%1/status").arg(p));
+        if (status.open(QIODevice::ReadOnly))
+            for (const QByteArray &l : status.readAll().split('\n'))
+                if (l.startsWith("RssShmem:"))
+                    return l.mid(9).trimmed().split(' ').value(0).toLongLong();
+    }
+    return -1;
+}
+
 class WebSurfaceInputTest : public QObject
 {
     Q_OBJECT
@@ -79,6 +102,18 @@ private Q_SLOTS:
         m_web->setParentItem(m_window->contentItem());
         c.completeCreate();
         m_window->show();
+        // A real compositor only renders windows it shows: with the screen
+        // off or locked nothing would be drawn (offscreen always renders).
+        if (qEnvironmentVariableIsSet("PRAJNA_TEST_REQUIRE_RHI")) {
+            // two frames: the second one needs the compositor's frame
+            // callback, which never comes while the outputs are off
+            QSignalSpy swapped(m_window, &QQuickWindow::frameSwapped);
+            for (int i = 0; i < 2; ++i) {
+                m_window->update();
+                if (!QTest::qWaitFor([&] { return swapped.count() > i; }, 3000))
+                    QSKIP("the compositor doesn't let the window render (screen off?): the RHI path can't be tested");
+            }
+        }
         QVERIFY(QTest::qWaitFor([&] { return m_web->property("running").toBool(); }, 15000));
         QVERIFY(QTest::qWaitFor([&] { return !m_web->property("loading").toBool() && m_web->property("loadProgress").toInt() == 100; }, 15000));
     }
@@ -147,6 +182,10 @@ private Q_SLOTS:
     void partialUpdatesMatchFullCopy()
     {
         qInfo() << "scene graph:" << (m_window->rhi() ? m_window->rhi()->backendName() : "software");
+        // the partial-upload path (FrameTexture) needs the RHI; offscreen
+        // runs only cover the QImage fallback
+        if (qEnvironmentVariableIsSet("PRAJNA_TEST_REQUIRE_RHI"))
+            QVERIFY2(m_window->rhi(), "no RHI scene graph: FrameTexture not exercised");
         // Many small random repaints → damage-limited copies and uploads.
         m_web->setProperty("testResult", QVariant());
         QMetaObject::invokeMethod(m_web, "load", Q_ARG(QUrl, QUrl(QStringLiteral(
@@ -159,13 +198,21 @@ private Q_SLOTS:
         QTest::qWait(500);
         const QImage partial = m_window->grabWindow();
 
-        // Hide/show drops the frame and texture and re-copies them whole.
+        // Hide/show keeps the texture and catches up with the damage.
         QVERIFY(m_web->property("frameResident").toBool());
         m_web->setProperty("suspended", true);
         QVERIFY(QTest::qWaitFor([&] { return !m_web->property("frameResident").toBool(); }, 3000));
         m_web->setProperty("suspended", false);
         QVERIFY(QTest::qWaitFor([&] { return m_web->property("frameResident").toBool(); }, 3000));
         QTest::qWait(200);
+        QVERIFY2(m_window->grabWindow() == partial, "hide/show changed the view");
+
+        // A new scene-graph node copies the whole frame from the shm slot.
+        m_web->setParentItem(nullptr);
+        QTest::qWait(100);
+        m_web->setParentItem(m_window->contentItem());
+        QVERIFY(QTest::qWaitFor([&] { return m_web->property("frameResident").toBool(); }, 3000));
+        QTest::qWait(300);
         const QImage full = m_window->grabWindow();
 
         if (partial != full && qEnvironmentVariableIsSet("PRAJNA_TEST_DUMP")) {
@@ -192,6 +239,56 @@ private Q_SLOTS:
         QTest::qWait(300);
         QVERIFY(m_web->property("frameResident").toBool());
         QVERIFY2(m_window->grabWindow() == before, "quick hide/show left the view blank");
+    }
+
+    void releasedSlotsKeepFrame()
+    {
+        // Hidden long enough, the engine gives the memory of the unpublished
+        // shm slot back (after PRAJNA_SLOT_RELEASE_DELAY_S=1 s here).
+        // The view must come back unchanged, also when its texture has to
+        // be rebuilt, and keep receiving frames.
+        const QImage before = m_window->grabWindow();
+        const qint64 shmBefore = engineShmemKb();
+        m_web->setProperty("suspended", true);
+        QTest::qWait(1800);
+        const qint64 shmHidden = engineShmemKb();
+        qInfo() << "engine shm while shown" << shmBefore << "kB, hidden" << shmHidden << "kB";
+        QVERIFY2(shmHidden < shmBefore, "the unpublished slot was not released");
+        m_web->setProperty("suspended", false);
+        QTest::qWait(300);
+        const QImage after = m_window->grabWindow();
+        if (after != before && qEnvironmentVariableIsSet("PRAJNA_TEST_DUMP")) {
+            before.save(qEnvironmentVariable("PRAJNA_TEST_DUMP") + QStringLiteral("/before.png"));
+            after.save(qEnvironmentVariable("PRAJNA_TEST_DUMP") + QStringLiteral("/after.png"));
+        }
+        QVERIFY2(after == before, "the view changed after the slots were released");
+
+        m_web->setProperty("suspended", true);
+        QTest::qWait(1800);
+        m_web->setParentItem(nullptr); // the texture is gone: a full copy is needed
+        QTest::qWait(100);
+        m_web->setProperty("suspended", false);
+        m_web->setParentItem(m_window->contentItem());
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->grabWindow() == before, 3000);
+
+        QCOMPARE(js(QStringLiteral("document.body.style.background = 'rgb(10, 200, 30)', 'ok'")), QStringLiteral("ok"));
+        QTRY_COMPARE_WITH_TIMEOUT(m_window->grabWindow().pixelColor(395, 295), QColor(10, 200, 30), 3000);
+        // Small changes land in both slots (the released one was refilled
+        // whole); a texture rebuilt from the slot must match what partial
+        // updates produced.
+        for (int i = 0; i < 2; ++i) {
+            QCOMPARE(js(QStringLiteral("(() => { const d = document.createElement('div'); d.textContent = 'x%1';"
+                                       " d.style.cssText = 'position:fixed;left:%2px;top:5px'; document.body.appendChild(d); return 'ok' })()")
+                            .arg(i)
+                            .arg(5 + 30 * i)),
+                     QStringLiteral("ok"));
+            QTest::qWait(300);
+        }
+        const QImage partial = m_window->grabWindow();
+        m_web->setParentItem(nullptr);
+        QTest::qWait(100);
+        m_web->setParentItem(m_window->contentItem());
+        QTRY_VERIFY_WITH_TIMEOUT(m_window->grabWindow() == partial, 3000);
     }
 
     // Last: leaves extra tabs behind until it cleans up.

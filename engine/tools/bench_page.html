@@ -1,0 +1,138 @@
+<!doctype html>
+<!-- Synthetic chat page for prajna_bench.py: the structure that matters to
+     prajna-engine and clear_background.js on ChatGPT-like sites (base-coloured
+     body, sticky header, messages without bubbles, user bubbles and code
+     blocks as surfaces, a fade above a composer surface, hover buttons,
+     attribute-driven restyles), deterministic and offline.
+     URL hash: #n=<messages>  (each assistant message is ~60 elements). -->
+<html class="dark">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --base: #212121; --surface: #303030; }
+  html, body { margin: 0; background: var(--base); color: #ececec; font: 15px/1.55 sans-serif; }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  header { position: sticky; top: 0; background: var(--base); padding: 8px 12px; display: flex; gap: 8px; z-index: 2; }
+  header button, .actions button { background: transparent; color: inherit; border: 0; border-radius: 8px; padding: 4px 8px; }
+  header button:hover, .actions button:hover { background: #3a3a3a; }
+  main { flex: 1; overflow-y: auto; }
+  .thread { max-width: 760px; margin: 0 auto; padding: 0 16px 160px; }
+  .turn { padding: 12px 0; }
+  .user { display: flex; justify-content: flex-end; }
+  .user .bubble { background: var(--surface); border-radius: 18px; padding: 8px 14px; max-width: 70%; }
+  .assistant .md p { margin: 0 0 10px; }
+  .md pre { background: #0d0d0d; border-radius: 8px; padding: 10px; overflow: auto; }
+  .md code { font-family: monospace; }
+  .md table { border-collapse: collapse; } .md td { border: 1px solid #444; padding: 2px 6px; }
+  .actions { display: flex; gap: 4px; opacity: .7; }
+  .bottom { position: sticky; bottom: 0; background: var(--base); padding: 0 16px 12px; }
+  .fade { height: 32px; margin-top: -32px; background-image: linear-gradient(to bottom, transparent, var(--base)); }
+  form { max-width: 760px; margin: 0 auto; }
+  .composer { background: var(--surface); border-radius: 26px; padding: 10px 14px; display: flex; align-items: flex-end; gap: 8px; }
+  #prompt-textarea { flex: 1; min-height: 24px; max-height: 200px; overflow-y: auto; outline: none; white-space: pre-wrap; }
+  #prompt-textarea[data-empty="true"]::before { content: "Ask anything"; color: #888; }
+  #send { width: 32px; height: 32px; border-radius: 16px; border: 0; }
+  #send[data-state="idle"] { background: #676767; }
+  #send[data-state="ready"] { background: #fff; }
+  .count { font-size: 11px; color: #888; }
+  [data-state="streaming"] .cursor { display: inline-block; width: 8px; height: 14px; background: #ececec; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header><button>☰</button><div style="flex:1">ChatBench</div><button>Share</button></header>
+  <main><div class="thread" id="thread"></div></main>
+  <div class="bottom"><div class="fade"></div>
+    <form onsubmit="return false">
+      <div class="composer">
+        <div id="prompt-textarea" contenteditable="true" data-empty="true"></div>
+        <span class="count" id="count"></span>
+        <button id="send" data-state="idle" type="button"></button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+const LOREM = 'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua'.split(' ');
+const thread = document.getElementById('thread');
+function word(i) { return LOREM[i % LOREM.length]; }
+function para(seed, n) { let s = []; for (let i = 0; i < n; i++) s.push(word(seed + i * 7)); return s.join(' '); }
+/* one turn: a user bubble + an assistant markdown answer (~60 elements) */
+function turnHTML(i) {
+  let md = '';
+  for (let k = 0; k < 4; k++) md += `<p>${para(i + k, 24)} <strong>${word(i)}</strong> <code>${word(k)}</code></p>`;
+  md += `<ul>${[0, 1, 2, 3].map(k => `<li><span>${para(i + k, 6)}</span> <em>${word(k)}</em></li>`).join('')}</ul>`;
+  md += `<pre><code>${[0, 1, 2].map(k => `<span class="tok">let</span> x${k} = <span class="num">${i + k}</span>;`).join('\n')}</code></pre>`;
+  md += `<table><tr><td>a</td><td>b</td></tr><tr><td>${i}</td><td>${word(i)}</td></tr></table>`;
+  /* chat sites nest each message in many layout wrappers */
+  const wrap = (s, d) => d ? `<div class="w${d}">${wrap(s, d - 1)}</div>` : s;
+  const btn = (t) => `<button><span class="icon"><span>${t}</span></span></button>`;
+  return `<div class="turn user"><div class="bubble"><div><span>${para(i, 8)}</span></div></div></div>` +
+    `<div class="turn assistant">${wrap(`<div class="md">${md}</div>`, 6)}` +
+    `<div class="actions"><div><div>${btn('⧉')}${btn('👍')}${btn('👎')}${btn('↻')}</div></div></div></div>`;
+}
+function build(n) {
+  const frag = document.createElement('div');
+  let html = '';
+  for (let i = 0; i < n; i++) html += turnHTML(i);
+  frag.innerHTML = html;
+  thread.replaceChildren(...frag.childNodes);
+  return document.getElementsByTagName('*').length;
+}
+const n = +(new URLSearchParams(location.hash.slice(1)).get('n') || 4);
+build(n);
+main = document.querySelector('main');
+main.scrollTop = main.scrollHeight;
+
+/* React-like composer: every input re-renders the send button state, the
+   counter and a little derived state, as chat sites do. */
+const ed = document.getElementById('prompt-textarea');
+const send = document.getElementById('send'), count = document.getElementById('count');
+ed.addEventListener('input', () => {
+  const t = ed.textContent;
+  let h = 0;
+  for (let r = 0; r < 20; r++) for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+  ed.dataset.empty = t.length ? 'false' : 'true';
+  send.dataset.state = t.length ? 'ready' : 'idle';
+  count.textContent = t.length ? `${t.length} · ${h & 0xff}` : '';
+});
+
+/* streaming answer: ~cps characters per second, new paragraph every ~40 words */
+let streamTimer = 0;
+window.benchStream = (cps) => {
+  clearInterval(streamTimer);
+  if (!cps) return;
+  const turn = document.createElement('div');
+  turn.className = 'turn assistant';
+  turn.dataset.state = 'streaming';
+  turn.innerHTML = '<div><div class="md"><p></p></div></div>';
+  thread.appendChild(turn);
+  const md = turn.querySelector('.md');
+  let p = md.lastChild, w = 0;
+  const per = Math.max(1, Math.round(cps / 20)); /* words per 50 ms tick */
+  streamTimer = setInterval(() => {
+    for (let k = 0; k < per; k++) {
+      p.append((p.textContent ? ' ' : '') + word(w++));
+      if (w % 40 === 0) { p = document.createElement('p'); md.appendChild(p); }
+      if (w % 160 === 0) { const pre = document.createElement('pre'); pre.innerHTML = '<code>let y = 1;</code>'; md.appendChild(pre); }
+    }
+    main.scrollTop = main.scrollHeight;
+  }, 50);
+};
+/* main-thread responsiveness: worst lateness of a 50 ms timer chain */
+window.benchLag = { max: 0, sum: 0, n: 0, over50: 0 };
+(function lag() {
+  let last = performance.now();
+  setInterval(() => {
+    const now = performance.now(), late = now - last - 50;
+    last = now;
+    const L = window.benchLag;
+    if (late > L.max) L.max = late;
+    L.sum += Math.max(0, late); L.n++;
+    if (late > 50) L.over50++;
+  }, 50);
+})();
+window.benchBuild = build;
+</script>
+</body>
+</html>
