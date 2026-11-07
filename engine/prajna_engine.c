@@ -5,10 +5,12 @@
  * engine_wpe_main.c, ported from libwpe/wpebackend-fdo to the WPE Platform
  * API (WPEWebKit >= 2.48), which is what current distributions ship.
  *
- * Rendering is software-only: our WPEDisplay advertises no DRM device and no
- * EGL display, so WebKit renders with Skia on the CPU into WPEBufferSHM
- * buffers that ZView::render_buffer copies into the shm slot. No GPU context
- * is created anywhere — neither here nor in plasmashell.
+ * Frames travel as pixels: our WPEDisplay advertises no DRM device and no
+ * EGL display, so WebKit hands ZView::render_buffer WPEBufferSHM buffers
+ * (read back from its compositor) that are copied into the shm slot. The web
+ * process paints and composites with Skia either on the integrated GPU
+ * (--gpu: a surfaceless EGL context on its render node) or on the CPU with
+ * Mesa's software rasterizer; see configure_gpu().
  *
  * Everything runs on the GLib main loop: the control fd is a GSource and
  * WebKit callbacks fire on the same thread, so no locking is needed.
@@ -67,9 +69,17 @@ static int g_ctl = 3;
 static int g_width = 1000, g_height = 700; /* logical */
 static double g_scale = 1.0;
 static int g_frame_events;
-/* Frame pacing. Every frame costs WebKit a full composite + readback in
- * software, so a panel widget defaults to 30 fps (--max-fps). */
+/* Frame pacing. Every frame costs WebKit a composite + readback, so a panel
+ * widget defaults to 30 fps (--max-fps). While the user interacts (keys,
+ * clicks and drags, scrolling, resizing) the cap is lifted to BOOST_FPS for
+ * BOOST_WINDOW_US after the last input event, so typed characters and
+ * scrolled content show up sooner; streaming answers and page animations
+ * alone keep the configured rate. Pacing only delays frames WebKit has
+ * already decided to draw: a static page produces none at any rate. */
 static gint64 g_frame_interval_us = 1000000 / 30;
+#define BOOST_FPS 60
+#define BOOST_WINDOW_US (300 * 1000)
+static gint64 g_boost_until_us;
 static int g_visible = 1;
 static int g_focused;
 static GMainLoop *g_loop;
@@ -178,6 +188,39 @@ static int g_slot_w[2], g_slot_h[2];
 static rect_t g_prev_damage;
 static int g_force_full = 1;
 
+/* The part of `r` where `src` (rows of `stride` bytes) differs from `prev`
+ * (the published frame, rows of w * 4 bytes). WebKit's damage is per layer,
+ * or missing (a whole frame): on chat sites a keystroke reports the whole
+ * composer, or everything, while the pixels that changed are a few glyphs.
+ * Comparing costs one read of both, much less than what a smaller rectangle
+ * saves downstream (slot copy, host copy, texture upload); a real full
+ * change is found at once (first and last rows differ). */
+static rect_t changed_bbox(const uint8_t *src, int stride, const uint8_t *prev, int w, rect_t r) {
+  const size_t row = (size_t)w * 4, off = (size_t)r.x * 4, len = (size_t)r.w * 4;
+  int y0 = r.y, y1 = r.y + r.h - 1;
+  while (y0 <= y1 && memcmp(src + (size_t)stride * (size_t)y0 + off, prev + row * (size_t)y0 + off, len) == 0)
+    y0++;
+  if (y0 > y1)
+    return (rect_t){0, 0, 0, 0};
+  while (y1 > y0 && memcmp(src + (size_t)stride * (size_t)y1 + off, prev + row * (size_t)y1 + off, len) == 0)
+    y1--;
+  /* columns: per row, only scan the part that could widen the box */
+  int x0 = r.x + r.w, x1 = r.x - 1;
+  for (int y = y0; y <= y1; y++) {
+    const uint32_t *a = (const uint32_t *)(src + (size_t)stride * (size_t)y);
+    const uint32_t *b = (const uint32_t *)(prev + row * (size_t)y);
+    int x = r.x;
+    while (x < x0 && a[x] == b[x])
+      x++;
+    x0 = x;
+    x = r.x + r.w - 1;
+    while (x > x1 && a[x] == b[x])
+      x--;
+    x1 = x;
+  }
+  return (rect_t){x0, y0, x1 - x0 + 1, y1 - y0 + 1};
+}
+
 static void publish_pixels(const uint8_t *src, int w, int h, int stride, rect_t damage) {
   if (!g_shm || w <= 0 || h <= 0)
     return;
@@ -189,9 +232,14 @@ static void publish_pixels(const uint8_t *src, int w, int h, int stride, rect_t 
   damage = g_force_full ? full : rect_clip(damage, w, h);
 
   uint32_t seq = __atomic_load_n(&g_shm->seq, __ATOMIC_RELAXED);
-  int slot = (int)(((seq / 2) + 1) % 2);
+  int slot = (int)(((seq / 2) + 1) % 2), shown = 1 - slot;
   uint8_t *dst = g_shm_pixels + (size_t)slot * ZURF_SHM_SLOT_SIZE;
   size_t row = (size_t)w * 4;
+  if (!g_force_full && g_slot_w[shown] == w && g_slot_h[shown] == h && !rect_empty(damage) && stride % 4 == 0) {
+    damage = changed_bbox(src, stride, g_shm_pixels + (size_t)shown * ZURF_SHM_SLOT_SIZE, w, damage);
+    if (rect_empty(damage))
+      return; /* the same pixels as the published frame: nothing to show */
+  }
 
   rect_t copy = (g_slot_w[slot] == w && g_slot_h[slot] == h) ? rect_union(damage, g_prev_damage) : full;
   copy = rect_clip(copy, w, h);
@@ -215,6 +263,49 @@ static void publish_pixels(const uint8_t *src, int w, int h, int stride, rect_t 
   if (g_frame_events) {
     int32_t d[4] = {damage.x, damage.y, damage.w, damage.h};
     send_event(ZURF_EV_FRAME, d, sizeof(d));
+  }
+}
+
+/* Hidden for SLOT_RELEASE_DELAY_S: the pages of the slot that is NOT
+ * published go back to the system (the shm file lives on tmpfs: 8.6 MB for
+ * a 600x900 popup at 200%, up to 35 MB at 4K). The published slot stays: the
+ * host may need a complete frame at any time (a rebuilt texture) and WebKit
+ * doesn't repaint an unchanged page when it is shown again. The next publish
+ * refills the released slot whole (its size is forgotten), while the damage
+ * reported stays WebKit's. The host only ever reads the published slot, and
+ * the seqlock covers a publish racing with its copy. */
+#define SLOT_RELEASE_DELAY_S 10
+static guint g_release_source;
+
+static gboolean release_slots(gpointer data) {
+  (void)data;
+  g_release_source = 0;
+  if (!g_shm || g_visible)
+    return G_SOURCE_REMOVE;
+  uint32_t seq = __atomic_load_n(&g_shm->seq, __ATOMIC_RELAXED);
+  int slot = (int)(((seq / 2) + 1) % 2); /* the one publish_pixels writes next */
+  if (g_slot_w[slot] == 0)
+    return G_SOURCE_REMOVE; /* never written or already released */
+  uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+  uintptr_t begin = (uintptr_t)(g_shm_pixels + (size_t)slot * ZURF_SHM_SLOT_SIZE);
+  uintptr_t end = begin + ZURF_SHM_SLOT_SIZE;
+  begin = (begin + page - 1) / page * page;
+  end = end / page * page;
+  g_slot_w[slot] = g_slot_h[slot] = 0;
+  if (end > begin && madvise((void *)begin, end - begin, MADV_REMOVE) != 0)
+    g_warning("releasing a frame slot: %s", g_strerror(errno));
+  return G_SOURCE_REMOVE;
+}
+
+static void slots_visibility_changed(void) {
+  if (g_release_source) {
+    g_source_remove(g_release_source);
+    g_release_source = 0;
+  }
+  if (!g_visible) {
+    const char *env = g_getenv("PRAJNA_SLOT_RELEASE_DELAY_S"); /* tests */
+    guint delay = env && atoi(env) > 0 ? (guint)atoi(env) : SLOT_RELEASE_DELAY_S;
+    g_release_source = g_timeout_add_seconds(delay, release_slots, NULL);
   }
 }
 
@@ -323,10 +414,21 @@ G_DEFINE_FINAL_TYPE(ZView, z_view, WPE_TYPE_VIEW)
 
 static tab_t *tab_of_wview(WPEView *v);
 
+static gint64 frame_interval_us(gint64 now) {
+  if (now < g_boost_until_us && g_frame_interval_us > 1000000 / BOOST_FPS)
+    return 1000000 / BOOST_FPS;
+  return g_frame_interval_us;
+}
+
+static guint tick_delay_ms(ZView *zv, gint64 now) {
+  gint64 elapsed = now - zv->last_tick_us, interval = frame_interval_us(now);
+  return elapsed >= interval ? 0 : (guint)((interval - elapsed) / 1000);
+}
+
 /* Emulated vsync: WebKit renders the next frame only after buffer_rendered,
- * so pacing here caps the engine at ~60 fps and lets it idle when nothing
- * changes. The buffer is released right away — its pixels already live in
- * the shm slot. */
+ * so pacing here caps the frame rate (see g_frame_interval_us) and lets the
+ * engine idle when nothing changes. The buffer is released right away — its
+ * pixels already live in the shm slot. */
 static gboolean z_view_tick(gpointer data) {
   ZView *zv = data;
   zv->tick_source = 0;
@@ -356,12 +458,24 @@ static gboolean z_view_render_buffer(WPEView *view, WPEBuffer *buffer,
     g_object_unref(zv->pending);
   }
   zv->pending = g_object_ref(buffer);
-  if (!zv->tick_source) {
-    gint64 elapsed = g_get_monotonic_time() - zv->last_tick_us;
-    guint delay_ms = elapsed >= g_frame_interval_us ? 0 : (guint)((g_frame_interval_us - elapsed) / 1000);
-    zv->tick_source = g_timeout_add(delay_ms, z_view_tick, zv);
-  }
+  if (!zv->tick_source)
+    zv->tick_source = g_timeout_add(tick_delay_ms(zv, g_get_monotonic_time()), z_view_tick, zv);
   return TRUE;
+}
+
+/* Input arrived: lift the frame cap for a while. A frame already waiting
+ * for its tick at the ordinary rate is let through at the boosted one. */
+static void input_boost(WPEView *view) {
+  gint64 now = g_get_monotonic_time();
+  gboolean was_boosted = now < g_boost_until_us;
+  g_boost_until_us = now + BOOST_WINDOW_US;
+  if (was_boosted || !view || !Z_IS_VIEW(view))
+    return;
+  ZView *zv = Z_VIEW(view);
+  if (zv->tick_source) {
+    g_source_remove(zv->tick_source);
+    zv->tick_source = g_timeout_add(tick_delay_ms(zv, now), z_view_tick, zv);
+  }
 }
 
 static void z_view_set_cursor_from_name(WPEView *view, const char *name) {
@@ -1569,6 +1683,25 @@ static char *dup_str(const uint8_t *p, uint32_t n) { return g_strndup((const cha
 static void handle(uint8_t op, const uint8_t *pl, uint32_t len) {
   WebKitWebView *view = g_active ? g_active->view : NULL;
   switch (op) {
+  case ZURF_OP_MOUSE_MOVE: /* only drags: hovering over a streaming answer isn't interaction */
+    if (len >= 12 && (geti(pl, 2) & (ZURF_MOD_BUTTON_LEFT | ZURF_MOD_BUTTON_MIDDLE | ZURF_MOD_BUTTON_RIGHT)))
+      input_boost(g_active ? g_active->wview : NULL);
+    break;
+  case ZURF_OP_RESIZE:
+  case ZURF_OP_MOUSE_BUTTON:
+  case ZURF_OP_MOUSE_WHEEL:
+  case ZURF_OP_SCROLL:
+  case ZURF_OP_KEY:
+  case ZURF_OP_KEY_NATIVE:
+  case ZURF_OP_TEXT:
+  case ZURF_OP_INSERT_TEXT:
+  case ZURF_OP_EDIT:
+    input_boost(g_active ? g_active->wview : NULL);
+    break;
+  default:
+    break;
+  }
+  switch (op) {
   case ZURF_OP_NAVIGATE:
     if (view) {
       char *url = dup_str(pl, len);
@@ -1682,6 +1815,7 @@ static void handle(uint8_t op, const uint8_t *pl, uint32_t len) {
     if (len >= 4) {
       g_visible = geti(pl, 0);
       tab_set_visible(g_active, g_visible);
+      slots_visibility_changed();
     }
     break;
   case ZURF_OP_FOCUS:
@@ -1869,17 +2003,25 @@ static gboolean integrated_gpu(char **node, char **pci) {
   return TRUE;
 }
 
-/* WebKit's web process always creates an EGL context for compositing. By
- * default it gets Mesa's software rasterizer: no GPU driver is loaded at all,
- * so driver bugs (e.g. nouveau crashing on hybrid laptops) can't take the
- * page down and a sleeping discrete GPU stays asleep. The environment is
- * inherited by the WebKit child processes. */
+/* WebKit's web process always creates an EGL context for compositing.
+ *  - Software (no --gpu, or no integrated GPU): Mesa's software rasterizer,
+ *    and Skia paints on the CPU (WEBKIT_SKIA_ENABLE_CPU_RENDERING). No GPU
+ *    driver is loaded at all, so driver bugs (e.g. nouveau crashing on hybrid
+ *    laptops) can't take the page down and a sleeping discrete GPU stays
+ *    asleep.
+ *  - --gpu: the context lives on the integrated GPU, and Skia paints there
+ *    too (Ganesh). Painting on the CPU while compositing on the GPU, as
+ *    earlier versions did, costs a CPU worker thread per frame plus a tile
+ *    upload; measured on ChatGPT while typing: about a quarter less web
+ *    process CPU with GPU painting. Setting WEBKIT_SKIA_ENABLE_CPU_RENDERING=1
+ *    in the environment still forces CPU painting.
+ * The environment is inherited by the WebKit child processes. */
 static void configure_gpu(int use_gpu) {
-  g_setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", FALSE);
   g_unsetenv("DRI_PRIME");
   if (g_file_test("/usr/share/glvnd/egl_vendor.d/50_mesa.json", G_FILE_TEST_EXISTS))
     g_setenv("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json", TRUE);
   if (!use_gpu) {
+    g_setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", FALSE);
     g_setenv("LIBGL_ALWAYS_SOFTWARE", "1", TRUE);
     g_setenv("GALLIUM_DRIVER", "llvmpipe", TRUE);
     g_setenv("LP_NUM_THREADS", "0", FALSE); /* rasterize inline: fewer threads, less RAM */
@@ -1978,8 +2120,14 @@ int main(int argc, char **argv) {
   }
   wpe_display_set_primary(g_display);
 
-  /* Memory pressure: let WebKit trim caches early and kill a runaway web
-   * process instead of growing without bound inside a panel widget. */
+  /* Memory pressure. Every web/network process polls its own footprint
+   * every 30 s against a limit (WebKit's default: the RAM size, at most
+   * 3 GB) and, above the conservative fraction of it (default 0.33),
+   * releases non-critical memory such as caches; above the strict one
+   * (default 0.5) it releases memory aggressively, every poll. With
+   * --memory-limit-mb the user's limit and earlier fractions apply. No kill
+   * threshold is set (WebKit's default 0 = never): a process over the limit
+   * keeps running, it is only trimmed harder. */
   int mem_mb = mem_s ? atoi(mem_s) : 0;
   if (mem_mb > 0) {
     WebKitMemoryPressureSettings *mp = webkit_memory_pressure_settings_new();
@@ -2015,7 +2163,7 @@ int main(int argc, char **argv) {
   webkit_settings_set_enable_webrtc(g_settings, TRUE);
   webkit_settings_set_enable_mediasource(g_settings, TRUE);
   webkit_settings_set_enable_encrypted_media(g_settings, FALSE);
-  webkit_settings_set_enable_webgl(g_settings, FALSE); /* CPU-only engine */
+  webkit_settings_set_enable_webgl(g_settings, FALSE); /* chat sites don't need it */
   webkit_settings_set_enable_2d_canvas_acceleration(g_settings, FALSE);
   webkit_settings_set_javascript_can_access_clipboard(g_settings, TRUE);
   webkit_settings_set_javascript_can_open_windows_automatically(g_settings, TRUE);
