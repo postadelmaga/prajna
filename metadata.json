@@ -22,7 +22,7 @@
         "Name": "Prajna",
         "Website": "https://github.com/postadelmaga/prajna",
         "BugReportUrl": "https://github.com/postadelmaga/prajna/issues",
-        "Version": "3.1.1"
+        "Version": "3.1.2"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }
